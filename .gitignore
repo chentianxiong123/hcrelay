@@ -1,0 +1,17 @@
+# 编译产物
+hcrelay
+hcrelay-android-arm64
+go/hcrelay
+wails3/bin/
+wails3/frontend/dist/
+wails3/frontend/node_modules/
+
+# gradle 构建中间产物
+wails3/build/android/app/build/
+wails3/build/android/build/
+wails3/build/android/.gradle/
+wails3/build/android/app/src/main/jniLibs/
+
+# wails3 生成的 overlay（每次 build 现生成）
+wails3/build/android/overlay.json
+wails3/build/android/main_android.gen.go

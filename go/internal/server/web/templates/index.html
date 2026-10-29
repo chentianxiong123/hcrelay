@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HomeCast Relay</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#0a0b0e;--bg2:#0f1118;--card:#141720;--card2:#1a1e2a;
+  --line:#222838;--fg:#e4e9f2;--dim:#5e6880;--dim2:#3a4358;
+  --acc:#ff4d6d;--ok:#34d399;--warn:#fbbf24;
+}
+*{box-sizing:border-box;margin:0}
+body{
+  background:var(--bg);color:var(--fg);
+  font:14px/1.55 -apple-system,"PingFang SC","Noto Sans SC",sans-serif;
+  padding:16px 16px 20px;max-width:500px;margin:0 auto;min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* header */
+.hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.logo{width:38px;height:38px;background:linear-gradient(135deg,var(--acc),#ff8a5c);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.hdr-t{flex:1;min-width:0}
+.hdr-t h1{font-size:15px;font-weight:700}
+.hdr-t .sub{font-size:10px;color:var(--dim);word-break:break-all;margin-top:1px}
+.hdr-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:blink 1.4s infinite;flex-shrink:0}
+@keyframes blink{50%{opacity:.25}}
+
+/* card */
+.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 13px;margin-bottom:10px}
+.card h2{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:9px}
+
+/* mode tabs */
+.mtabs{display:flex;gap:5px;margin-bottom:7px}
+.mtab{flex:1;padding:9px 4px;text-align:center;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--line);background:var(--card2);color:var(--dim);transition:all .12s;user-select:none}
+.mtab.on{background:var(--acc);border-color:var(--acc);color:#fff;box-shadow:0 4px 12px rgba(255,77,109,.22)}
+.mhint{font-size:10px;color:var(--dim);line-height:1.4;min-height:14px}
+
+/* stat grid */
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:2px}
+.si{background:var(--card2);border-radius:8px;padding:8px 10px;min-width:0}
+.si .sl{font-size:9px;color:var(--dim2);font-weight:600;letter-spacing:.08em;margin-bottom:2px}
+.si .sv{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.si .sv.dim{color:var(--dim)}.si .sv.ok{color:var(--ok)}.si .sv.warn{color:var(--warn)}
+.si .sv.link{font-size:9px;color:var(--dim);word-break:break-all;white-space:normal;max-height:2em;overflow:hidden}
+
+/* playing bar */
+.playbar{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;background:rgba(52,211,153,.07);border:1px solid rgba(52,211,153,.22);border-radius:8px}
+.playbar .pi{font-size:15px;flex-shrink:0}
+.playbar .pt{flex:1;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.playbar .pb{font-size:10px;color:var(--ok);flex-shrink:0}
+.errbar{margin-top:7px;padding:7px 10px;font-size:10px;color:var(--acc);background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.18);border-radius:7px;word-break:break-all}
+
+/* ── 设备气泡 ── */
+.bubbles{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.bub{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:13px 8px 10px;background:var(--card2);border:1.5px solid var(--line);
+  border-radius:12px;cursor:pointer;transition:all .15s;position:relative;user-select:none;
+}
+.bub:hover{border-color:var(--dim);transform:translateY(-1px)}
+.bub.on{border-color:var(--acc);background:linear-gradient(180deg,rgba(255,77,109,.1),transparent);box-shadow:0 4px 16px rgba(255,77,109,.15)}
+.bub .bub-ic{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:7px;flex-shrink:0}
+.bub .bub-ic.tv{background:rgba(96,165,250,.12)}
+.bub.on .bub-ic.tv{background:rgba(255,77,109,.2)}
+.bub .bub-ic.self{background:rgba(52,211,153,.1)}
+.bub .bub-name{font-size:11px;font-weight:700;text-align:center;word-break:break-all;line-height:1.3}
+.bub .bub-ip{font-size:9px;color:var(--dim2);margin-top:2px}
+.bub .bub-tag{position:absolute;top:6px;right:8px;font-size:8px;font-weight:700;padding:1px 6px;border-radius:4px}
+.bub .bub-tag.self{background:rgba(52,211,153,.15);color:var(--ok)}
+.bub .bub-tag.on{background:var(--acc);color:#fff}
+.bub-empty{grid-column:1/-1;font-size:11px;color:var(--dim2);text-align:center;padding:14px;background:var(--bg2);border-radius:9px;line-height:1.5}
+
+/* btn */
+.btn{border:0;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:transform .1s}
+.btn:active{transform:scale(.94)}
+.btn.gh{background:transparent;border:1px solid var(--line);color:var(--dim);display:block;width:100%;margin-top:8px}
+.btn.gh:active{border-color:var(--dim);color:var(--fg)}
+
+/* logs */
+.logs{font-family:"SF Mono",ui-monospace,monospace;font-size:9.5px;color:var(--dim2);max-height:110px;overflow-y:auto;background:var(--bg2);border-radius:8px;padding:8px 10px;line-height:1.7}
+.logs div{white-space:pre-wrap;word-break:break-all}
+
+/* toast */
+#toast{min-height:15px;font-size:11px;text-align:center;margin-top:6px}
+#toast .ok{color:var(--ok)}#toast .err{color:var(--acc)}
+
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="logo">▶</div>
+  <div class="hdr-t">
+    <h1>HomeCast Relay</h1>
+    <div class="sub" id="baseurl">{{.BaseURL}}</div>
+  </div>
+  <div class="hdr-dot" title="接收端在线"></div>
+</div>
+
+<!-- 模式 -->
+<div class="card">
+  <h2>播放模式</h2>
+  <div class="mtabs">
+    <div class="mtab" data-mode="proxy" onclick="setMode('proxy')">直连代理</div>
+    <div class="mtab" data-mode="remux" onclick="setMode('remux')">重封装</div>
+    <div class="mtab" data-mode="hls" onclick="setMode('hls')">HLS修复</div>
+  </div>
+  <div class="mhint" id="mhint">直连代理：最轻量，不依赖 ffmpeg</div>
+</div>
+
+<!-- 状态 -->
+<div class="card">
+  <h2>实时状态</h2>
+  <div class="sg">
+    <div class="si"><div class="sl">接收端</div><div class="sv ok">SSDP 广播中</div></div>
+    <div class="si"><div class="sl">当前模式</div><div class="sv dim" id="st-mode">—</div></div>
+    <div class="si"><div class="sl">目标电视</div><div class="sv warn" id="st-tv">未选择</div></div>
+    <div class="si"><div class="sl">B站流地址</div><div class="sv link" id="st-url">—</div></div>
+  </div>
+  <div id="playbar-wrap" class="hidden">
+    <div class="playbar">
+      <div class="pi">▶</div>
+      <div class="pt" id="pb-title">—</div>
+      <div class="pb" id="pb-bytes">0 B</div>
+    </div>
+  </div>
+  <div id="errbar" class="errbar hidden">—</div>
+</div>
+
+<!-- 设备 -->
+<div class="card">
+  <h2>设备</h2>
+  <div class="bubbles" id="bubbles"><div class="bub-empty">加载中…</div></div>
+  <button class="btn gh" onclick="rescan()">重新扫描</button>
+  <div id="toast"></div>
+</div>
+
+<!-- 日志 -->
+<div class="card">
+  <h2>日志</h2>
+  <div class="logs" id="logs"></div>
+</div>
+
+<script>
+const HINTS = {
+  proxy: "直连代理：最轻量，不依赖 ffmpeg（推荐先用这个）",
+  remux: "重封装：ffmpeg 重封装修时间戳（需 ffmpeg 在 PATH）",
+  hls:   "HLS修复：m3u8 片段 URL 重写本机（仅适用于 m3u8 流）"
+};
+const SELF_NAME = "HomeCast Relay";
+
+function toast(msg, ok=true) {
+  const el = document.getElementById('toast');
+  el.innerHTML = '<span class="'+(ok?'ok':'err')+'">'+msg+'</span>';
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>{ el.innerHTML=''; }, 3000);
+}
+
+function setMode(m) {
+  fetch('/api/mode?mode='+m).then(r=>r.json()).then(d=>{
+    if(d.ok) toast('已切到 '+m);
+    refresh();
+  });
+}
+
+function selectTV(name) {
+  toast('正在选择 '+name+'…');
+  fetch('/api/tv/select?name='+encodeURIComponent(name)).then(r=>r.json()).then(d=>{
+    if(d.ok) toast('已选择 '+d.tv); else toast(d.msg||'选择失败', false);
+    refresh();
+  });
+}
+
+function rescan() {
+  toast('扫描中…');
+  fetch('/api/tv/scan').then(r=>r.json()).then(()=>{
+    toast('扫描完成');
+    refresh();
+  });
+}
+
+function fmtBytes(n) {
+  if(n < 1024) return n+' B';
+  if(n < 1048576) return (n/1024).toFixed(1)+' KB';
+  return (n/1048576).toFixed(1)+' MB';
+}
+
+function refresh() {
+  fetch('/api/status').then(r=>r.json()).then(d=>{
+    const s = d.status;
+
+    document.querySelectorAll('.mtab').forEach(t => {
+      t.classList.toggle('on', t.dataset.mode === s.mode);
+    });
+    document.getElementById('mhint').textContent = HINTS[s.mode]||'';
+    document.getElementById('st-mode').textContent = s.mode;
+
+    const tvEl = document.getElementById('st-tv');
+    if(s.tv) { tvEl.textContent = s.tv; tvEl.className='sv ok'; }
+    else { tvEl.textContent = '未选择'; tvEl.className='sv warn'; }
+
+    document.getElementById('st-url').textContent = s.cur_url || '—';
+
+    const pw = document.getElementById('playbar-wrap');
+    if(s.ses_title) {
+      pw.classList.remove('hidden');
+      document.getElementById('pb-title').textContent = s.ses_title;
+      document.getElementById('pb-bytes').textContent = fmtBytes(s.ses_bytes||0);
+    } else pw.classList.add('hidden');
+
+    const ew = document.getElementById('errbar');
+    if(s.last_err) { ew.textContent = s.last_err; ew.classList.remove('hidden'); }
+    else ew.classList.add('hidden');
+
+    renderBubbles(d.tvs||[], s.tv, s.ses_title);
+  }).catch(()=>{});
+}
+
+function renderBubbles(tvs, selected, playingTitle) {
+  const el = document.getElementById('bubbles');
+
+  // 把"自己"从 tvs 里拿掉，单独展示
+  const selfs = tvs.filter(t => t.name === SELF_NAME || t.udn.includes('relay'));
+  const realTVs = tvs.filter(t => !selfs.includes(t));
+
+  let html = '';
+
+  // 自己（接收端）气泡
+  html += '<div class="bub on" style="cursor:default">'+
+    '<span class="bub-tag self">本机</span>'+
+    '<div class="bub-ic self">'+(playingTitle?'📡':'📢')+'</div>'+
+    '<div class="bub-name">HomeCast Relay</div>'+
+    '<div class="bub-ip">'+(playingTitle?'正在中继':'等待投屏')+'</div>'+
+  '</div>';
+
+  // 真实电视气泡
+  if(realTVs.length) {
+    realTVs.forEach(t => {
+      const sel = t.name === selected;
+      html += '<div class="bub'+(sel?' on':'')+'" onclick="selectTV(\''+t.name.replace(/'/g,"")+'\')">'+
+        (sel?'<span class="bub-tag on">已选</span>':'')+
+        '<div class="bub-ic tv">📺</div>'+
+        '<div class="bub-name">'+t.name+'</div>'+
+        '<div class="bub-ip">'+t.ip+':'+t.port+'</div>'+
+      '</div>';
+    });
+  }
+
+  // 没有任何电视时占位
+  if(!realTVs.length) {
+    html += '<div class="bub-empty" style="grid-column:auto">'+
+      '未发现电视<br>点「重新扫描」试试<br><span style="font-size:9px">电视需与本程序同网段</span></div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// 日志
+let lastLogs = [];
+async function pollLogs() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const el = document.getElementById('logs');
+    const logs = d.logs || [];
+    if(JSON.stringify(logs) !== JSON.stringify(lastLogs)) {
+      lastLogs = logs;
+      el.innerHTML = logs.map(l=>'<div>'+l.replace(/</g,'&lt;')+'</div>').join('');
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch(e){}
+}
+setInterval(pollLogs, 2000);
+
+// 轮询
+setInterval(refresh, 2000);
+refresh();
+pollLogs();
+</script>
+</body>
+</html>

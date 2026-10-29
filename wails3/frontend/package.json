@@ -1,0 +1,9 @@
+{
+  "name": "hcrelay-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"require('fs').mkdirSync('dist',{recursive:true}); require('fs').writeFileSync('dist/index.html','<!doctype html><html><body>HomeCast Relay</body></html>');\"",
+    "build:dev": "node -e \"require('fs').mkdirSync('dist',{recursive:true}); require('fs').writeFileSync('dist/index.html','<!doctype html><html><body>HomeCast Relay</body></html>');\""
+  }
+}

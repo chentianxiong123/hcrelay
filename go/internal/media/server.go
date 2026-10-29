@@ -8,6 +8,7 @@ package media
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -24,6 +25,8 @@ import (
 type Mode string
 
 const (
+	// ModeAuto 自动：根据上游流类型自动选择（面向普通用户）
+	ModeAuto Mode = "auto"
 	ModeProxy Mode = "proxy"
 	ModeRemux Mode = "remux"
 	ModeHLS   Mode = "hls"
@@ -98,9 +101,13 @@ func (s *Server) Start(src Source, mode Mode) (*Session, error) {
 	case ModeProxy:
 		ses.URL = s.baseURL + "/m/" + id
 		ses.Type = src.MimeType
+		if isHLSURL(src.URL) || isHLSType(src.MimeType) {
+			// HLS：推给电视的 Content-Type 用标准值，电视才会当播放列表处理
+			ses.Type = "application/vnd.apple.mpegurl"
+		}
 	case ModeHLS:
 		ses.URL = s.baseURL + "/m/" + id + "/playlist.m3u8"
-		ses.Type = "application/x-mpegurl"
+		ses.Type = "application/vnd.apple.mpegurl"
 	default: // remux
 		ses.URL = s.baseURL + "/m/" + id + ".ts"
 		ses.Type = "video/mp2t"
@@ -265,7 +272,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
-	// /m/<id> 或 /m/<id>.ts 或 /m/<id>/playlist.m3u8
+	// /m/<id> 或 /m/<id>.ts 或 /m/<id>/playlist.m3u8 或 /m/<id>/seg/<b64> 或 /m/<id>/pl/<b64>
 	rest := strings.TrimPrefix(r.URL.Path, "/m/")
 	id := rest
 	if i := strings.Index(rest, "."); i > 0 {
@@ -281,19 +288,122 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no session", http.StatusNotFound)
 		return
 	}
+	// HLS 子路径（分片 / 嵌套播放列表）——两种模式通用
+	if strings.Contains(rest, "/seg/") || strings.Contains(rest, "/pl/") {
+		s.handleHLSSub(w, r, ses)
+		return
+	}
 	switch ses.Mode {
 	case ModeHLS:
 		s.handleHLS(w, r, ses)
 	case ModeRemux:
 		s.handleRemux(w, r, ses)
 	default:
+		// proxy 模式遇到 HLS 上游 → 自动走播放列表重写 + 分片代理
+		if isHLSURL(ses.Src.URL) || isHLSType(ses.Src.MimeType) {
+			s.handleHLSTop(w, r, ses)
+			return
+		}
 		s.handleProxy(w, r, ses)
 	}
 }
 
+// isHLSURL 判断 URL 是否是 HLS 播放列表
+func isHLSURL(u string) bool {
+	l := strings.ToLower(u)
+	return strings.Contains(l, ".m3u8") || strings.Contains(l, "mpegurl")
+}
+
+// isHLSType 判断 Content-Type 是否是 HLS
+func isHLSType(t string) bool {
+	return strings.Contains(strings.ToLower(t), "mpegurl")
+}
+
+// hlsSegPath 分片代理路径（base64url 编码上游绝对 URL，不会丢目录）
+func hlsSegPath(sessionID, absURL string) string {
+	return "/m/" + sessionID + "/seg/" + base64.RawURLEncoding.EncodeToString([]byte(absURL))
+}
+
+// hlsPlPath 嵌套播放列表代理路径（master playlist 里的 variant）
+func hlsPlPath(sessionID, absURL string) string {
+	return "/m/" + sessionID + "/pl/" + base64.RawURLEncoding.EncodeToString([]byte(absURL))
+}
+
+// decodeHlsPath 解码 base64url 上游绝对 URL
+func decodeHlsPath(enc string) (string, error) {
+	b, err := base64.RawURLEncoding.DecodeString(enc)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// handleHLSTop 顶层播放列表：拉上游 m3u8 并重写分片 URL
+func (s *Server) handleHLSTop(w http.ResponseWriter, r *http.Request, ses *Session) {
+	body, err := fetchAll(ses.Src.URL, ses.Src.Referer, ses.Src.UA)
+	if err != nil {
+		http.Error(w, "upstream playlist: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	s.writePlaylist(w, body, ses.Src.URL, ses.ID)
+}
+
+// writePlaylist 重写并输出播放列表
+func (s *Server) writePlaylist(w http.ResponseWriter, body []byte, upURL, sessionID string) {
+	rewritten := s.rewritePlaylist(body, upURL, sessionID)
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write([]byte(rewritten))
+}
+
+// handleHLSSub 处理 /m/<id>/seg/<b64>（二进制分片）和 /m/<id>/pl/<b64>（嵌套播放列表）
+func (s *Server) handleHLSSub(w http.ResponseWriter, r *http.Request, ses *Session) {
+	path := r.URL.Path
+	if i := strings.Index(path, "/pl/"); i > 0 {
+		abs, err := decodeHlsPath(path[i+4:])
+		if err != nil {
+			http.Error(w, "bad path", http.StatusBadRequest)
+			return
+		}
+		body, err := fetchAll(abs, ses.Src.Referer, ses.Src.UA)
+		if err != nil {
+			http.Error(w, "upstream playlist: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		rewritten := s.rewritePlaylist(body, abs, ses.ID)
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write([]byte(rewritten))
+		return
+	}
+	i := strings.Index(path, "/seg/")
+	if i <= 0 {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	abs, err := decodeHlsPath(path[i+5:])
+	if err != nil {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	s.proxyUpstream(w, r, abs, ses)
+}
+
 // handleProxy 透明反代 + Range + 补 Referer/UA
+//
+// 如果上游是 HLS 播放列表（按 Content-Type 判断，兼容抖音 URL 不带
+// .m3u8 后缀的情况），自动改写为分片代理模式。
 func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request, ses *Session) {
-	req, err := http.NewRequest(r.Method, ses.Src.URL, nil)
+	if isHLSURL(ses.Src.URL) || isHLSType(ses.Src.MimeType) {
+		s.handleHLSTop(w, r, ses)
+		return
+	}
+	s.proxyUpstream(w, r, ses.Src.URL, ses)
+}
+
+// proxyUpstream 反代指定上游 URL（补 Referer/UA，支持 Range）
+func (s *Server) proxyUpstream(w http.ResponseWriter, r *http.Request, upstream string, ses *Session) {
+	req, err := http.NewRequest(r.Method, upstream, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -317,7 +427,19 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request, ses *Sessio
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		log.Printf("[media] upstream %d mode=%s url=%s", resp.StatusCode, ses.Mode, ses.Src.URL)
+		log.Printf("[media] upstream %d mode=%s url=%s", resp.StatusCode, ses.Mode, upstream)
+	}
+	// 上游实际返回的是 HLS 播放列表（抖音等 URL 不带 .m3u8 后缀，
+	// 只能靠响应 Content-Type 判断）→ 丢弃本次响应，改走播放列表重写
+	if ses.Mode == ModeProxy && !strings.Contains(r.URL.Path, "/seg/") &&
+		isHLSType(resp.Header.Get("Content-Type")) {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			http.Error(w, "read playlist: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		s.writePlaylist(w, body, upstream, ses.ID)
+		return
 	}
 	// 记录总长度 + 起始位置（给进度条用）
 	ses.addUpstreamResponse(resp.Header)
@@ -337,28 +459,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request, ses *Sessio
 	_, _ = io.Copy(w, &countWriter{w: resp.Body, s: ses})
 }
 
-// handleHLS 把 m3u8 段 URL 重写到本机代理（治 HLS 被当直播越拖越慢）
+// handleHLS 播放列表模式：入口是 /m/<id>/playlist.m3u8
 func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request, ses *Session) {
-	if strings.HasSuffix(r.URL.Path, "playlist.m3u8") {
-		body, err := fetchAll(ses.Src.URL, ses.Src.Referer, ses.Src.UA)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		rewritten := rewritePlaylist(body, ses.Src.URL, s.baseURL+"/m/"+ses.ID+"/seg/")
-		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		w.Write([]byte(rewritten))
-		return
-	}
-	if i := strings.Index(r.URL.Path, "/seg/"); i > 0 {
-		segName := r.URL.Path[i+5:]
-		up, _ := url.Parse(ses.Src.URL)
-		base := up.Scheme + "://" + up.Host
-		segURL := base + "/" + segName
-		s.handleProxy(w, r, &Session{Src: Source{URL: segURL, Referer: ses.Src.Referer, UA: ses.Src.UA}})
-		return
-	}
-	http.Error(w, "bad hls path", http.StatusBadRequest)
+	s.handleHLSTop(w, r, ses)
 }
 
 // handleRemux ffmpeg 重封装成 TS（修时间戳、丢迟到片）
@@ -488,25 +591,85 @@ func fetchAll(up, referer, ua string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// rewritePlaylist 把 m3u8 里的段 URI 改成走本机代理
-func rewritePlaylist(body []byte, upURL, segBase string) string {
+// rewritePlaylist 把 m3u8 里的段 URI 改成走本机代理。
+//
+// 处理三种 URI：
+//   - 普通分片行（0000000.ts）→ /m/<id>/seg/<b64>
+//   - 子播放列表（master playlist 里的 variant）→ /m/<id>/pl/<b64>
+//   - EXT-X-MAP（fMP4 初始化段）、EXT-X-KEY（加密密钥）→ 同样走代理
+//
+// 用 base64url 编码上游绝对 URL，避免相对路径丢目录（旧实现把
+// https://cdn/x/y/000.ts 错当成 https://cdn/000.ts）。
+func (s *Server) rewritePlaylist(body []byte, upURL, sessionID string) string {
 	lines := strings.Split(string(body), "\n")
+	base, _ := url.Parse(upURL)
 	for i, ln := range lines {
-		ln = strings.TrimSpace(ln)
-		if ln == "" || strings.HasPrefix(ln, "#") {
+		trimmed := strings.TrimSpace(ln)
+		if trimmed == "" {
 			continue
 		}
-		u, err := url.Parse(ln)
-		if err != nil {
+		// 带标签的行：只处理 URI 属性（EXT-X-MAP / EXT-X-KEY / EXT-X-MEDIA）
+		if strings.HasPrefix(trimmed, "#") {
+			lines[i] = s.rewriteTagURIs(trimmed, base, sessionID)
 			continue
 		}
-		if !u.IsAbs() {
-			base, _ := url.Parse(upURL)
-			u = base.ResolveReference(u)
+		// 纯 URI 行：分片 或 子播放列表
+		abs := resolveURL(base, trimmed)
+		if abs == "" {
+			continue
 		}
-		lines[i] = segBase + strings.TrimPrefix(u.Path, "/")
+		// 判断是不是子播放列表（以 .m3u8 结尾）
+		if isHLSURL(abs) {
+			lines[i] = s.baseURL + hlsPlPath(sessionID, abs)
+		} else {
+			lines[i] = s.baseURL + hlsSegPath(sessionID, abs)
+		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// rewriteTagURIs 重写标签行里的 URI 属性
+func (s *Server) rewriteTagURIs(line string, base *url.URL, sessionID string) string {
+	// EXT-X-MAP:URI="xxx"
+	if i := strings.Index(line, `URI="`); i >= 0 {
+		rest := line[i+5:]
+		j := strings.Index(rest, `"`)
+		if j > 0 {
+			abs := resolveURL(base, rest[:j])
+			if abs != "" {
+				return line[:i+5] + s.baseURL + hlsSegPath(sessionID, abs) + rest[j:]
+			}
+		}
+	}
+	// EXT-X-KEY:URI="xxx"  （密钥走代理）
+	if strings.HasPrefix(line, "#EXT-X-KEY") {
+		if i := strings.Index(line, `URI="`); i >= 0 {
+			rest := line[i+5:]
+			j := strings.Index(rest, `"`)
+			if j > 0 {
+				abs := resolveURL(base, rest[:j])
+				if abs != "" {
+					return line[:i+5] + s.baseURL + hlsSegPath(sessionID, abs) + rest[j:]
+				}
+			}
+		}
+	}
+	return line
+}
+
+// resolveURL 把相对/绝对 URI 解析成绝对 URL
+func resolveURL(base *url.URL, ref string) string {
+	if base == nil {
+		return ref
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return ""
+	}
+	if u.IsAbs() {
+		return u.String()
+	}
+	return base.ResolveReference(u).String()
 }
 
 type countWriter struct {

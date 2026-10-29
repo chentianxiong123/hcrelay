@@ -185,22 +185,11 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
     </div>
 
     <div class="card">
-      <h2>播放模式</h2>
-      <div class="mtabs">
-        <div class="mtab" data-mode="proxy" onclick="setMode('proxy')">直连代理</div>
-        <div class="mtab" data-mode="remux" onclick="setMode('remux')">重封装</div>
-        <div class="mtab" data-mode="hls" onclick="setMode('hls')">HLS修复</div>
-      </div>
-      <div class="mhint" id="mhint">直连代理：最轻量，不依赖 ffmpeg</div>
-    </div>
-
-    <div class="card">
       <h2>实时状态</h2>
       <div class="sg">
         <div class="si"><div class="sl">目标电视</div><div class="sv warn" id="st-tv">未选择</div></div>
         <div class="si"><div class="sl">播放中</div><div class="sv dim" id="st-playing">—</div></div>
         <div class="si"><div class="sl">速度</div><div class="sv dim" id="st-speed">—</div></div>
-        <div class="si"><div class="sl">当前模式</div><div class="sv dim" id="st-mode">—</div></div>
       </div>
       <div id="errbar" class="errbar hidden">—</div>
     </div>
@@ -274,11 +263,6 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
 </nav>
 
 <script>
-const HINTS = {
-  proxy: "直连代理：最轻量，不依赖 ffmpeg（推荐）",
-  remux: "重封装：ffmpeg 重封装修时间戳（需 ffmpeg 在 PATH）",
-  hls:   "HLS修复：m3u8 片段 URL 重写本机（仅适用于 m3u8 流）"
-};
 const SELF_NAME = "HomeCast Relay";
 
 // ── 页面切换 ──
@@ -295,14 +279,6 @@ function toast(msg, ok=true) {
   el.innerHTML = '<span class="'+(ok?'ok':'err')+'">'+msg+'</span>';
   clearTimeout(el._t);
   el._t = setTimeout(()=>{ el.innerHTML=''; }, 3000);
-}
-
-// ── 模式 ──
-function setMode(m) {
-  fetch('/api/mode?mode='+m).then(r=>r.json()).then(d=>{
-    if(d.ok) toast('已切到 '+m);
-    refresh();
-  });
 }
 
 // ── 电视选择 ──
@@ -470,11 +446,6 @@ let volDragging = false;
 function refresh() {
   fetch('/api/status').then(r=>r.json()).then(d=>{
     const s = d.status;
-
-    // mode
-    document.querySelectorAll('.mtab').forEach(t => t.classList.toggle('on', t.dataset.mode === s.mode));
-    document.getElementById('mhint').textContent = HINTS[s.mode]||'';
-    document.getElementById('st-mode').textContent = s.mode;
 
     // tv
     const tvEl = document.getElementById('st-tv');

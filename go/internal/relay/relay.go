@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +38,8 @@ type Relay struct {
 
 // New 创建编排器
 func New(r *renderer.Renderer, m *media.Server, b *bili.Client, baseURL string) *Relay {
-	rl := &Relay{renderer: r, media: m, bili: b, BaseURL: baseURL, mode: media.ModeProxy}
+	// 面向普通用户：只有一个「自动」模式，由后端根据上游流自动决定处理方式
+	rl := &Relay{renderer: r, media: m, bili: b, BaseURL: baseURL, mode: media.ModeAuto}
 	// 订阅渲染端事件
 	r.SetEventFn(rl.onRendererEvent)
 	return rl
@@ -65,8 +67,11 @@ func (rl *Relay) setErr(msg string) {
 	rl.mu.Unlock()
 }
 
-// Mode 设置播放模式
+// Mode 设置播放模式（保留给内部/调试用；普通用户不需要选）
 func (rl *Relay) SetMode(m media.Mode) {
+	if m != media.ModeAuto && m != media.ModeProxy && m != media.ModeHLS && m != media.ModeRemux {
+		return
+	}
 	rl.mu.Lock()
 	rl.mode = m
 	rl.mu.Unlock()
@@ -78,6 +83,63 @@ func (rl *Relay) GetMode() media.Mode {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	return rl.mode
+}
+
+// resolveMode 解析实际处理方式。
+//
+// 面向普通用户：不需要选模式，统一用 proxy —— media 服务器会在收到
+// 上游响应后按 Content-Type（application/vnd.apple.mpegurl 等）自动
+// 判断是不是 HLS，是就自动重写播放列表并代理分片。
+// 这样抖音那种 URL 不带 .m3u8 后缀的流也能正确处理。
+func (rl *Relay) resolveMode(upstreamURL string) media.Mode {
+	rl.mu.Lock()
+	mode := rl.mode
+	rl.mu.Unlock()
+	if mode != media.ModeAuto && mode != "" {
+		return mode
+	}
+	return media.ModeProxy
+}
+
+// isHLSURL 判断 URL 是否看起来是 HLS 播放列表
+func isHLSURL(u string) bool {
+	l := strings.ToLower(u)
+	return strings.Contains(l, ".m3u8") || strings.Contains(l, "mpegurl")
+}
+
+// probeMime 探测上游真实 Content-Type（只读前几 KB，不下载整个流）。
+// 抖音等来源的 HLS URL 不带 .m3u8 后缀，只能靠响应头判断；
+// 探到播放列表就把 mime 改成 mpegurl，让推给电视的 DIDL 正确。
+func probeMime(ctx context.Context, rawURL, referer, ua string) string {
+	if isHLSURL(rawURL) {
+		return "application/vnd.apple.mpegurl"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", ua)
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+	// 只读头部，不下载 body
+	req.Header.Set("Range", "bytes=0-1023")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	ct := resp.Header.Get("Content-Type")
+	// 某些 CDN 对 Range 返回 200 + video/mp2t，但实际是 m3u8 文本；
+	// 读一点 body 看看开头是不是 #EXTM3U
+	if ct != "" && !strings.Contains(strings.ToLower(ct), "mpegurl") {
+		buf := make([]byte, 16)
+		n, _ := resp.Body.Read(buf)
+		if n > 0 && strings.HasPrefix(strings.TrimSpace(string(buf[:n])), "#EXTM3U") {
+			return "application/vnd.apple.mpegurl"
+		}
+	}
+	return ct
 }
 
 // onRendererEvent 渲染端事件回调
@@ -162,20 +224,29 @@ func (rl *Relay) startRelay(upstreamURL, meta string, _ int) {
 		rl.setErr("空 URL")
 		return
 	}
-	rl.mu.Lock()
-	mode := rl.mode
-	rl.mu.Unlock()
 
 	title := extractTitle(meta)
 	referer, ua := guessHeaders(upstreamURL)
+	// 探测上游真实 MIME：抖音等 HLS URL 不带 .m3u8 后缀，
+	// 不探测的话电视会把它当 MP4 而解析失败
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 6*time.Second)
+	realMime := probeMime(probeCtx, upstreamURL, referer, ua)
+	probeCancel()
+	mime := guessMime(upstreamURL)
+	if realMime != "" {
+		mime = realMime
+	}
+	if strings.Contains(strings.ToLower(mime), "mpegurl") {
+		mime = "application/vnd.apple.mpegurl"
+	}
 	src := media.Source{
 		URL:      upstreamURL,
-		MimeType: guessMime(upstreamURL),
+		MimeType: mime,
 		Referer:  referer,
 		UA:       ua,
 		Title:    title,
 	}
-	ses, err := rl.media.Start(src, mode)
+	ses, err := rl.media.Start(src, rl.resolveMode(upstreamURL))
 	if err != nil {
 		rl.setErr("媒体会话启动失败: " + err.Error())
 		rl.logf("媒体会话启动失败: %v", err)
@@ -207,7 +278,7 @@ func (rl *Relay) startRelayByCID(aid, cid string) {
 	}
 	rl.logf("playurl 取到流: %s", truncate(st.URL, 60))
 	rl.mu.Lock()
-	mode := rl.mode
+	mode := rl.resolveMode(st.URL)
 	rl.mu.Unlock()
 	ses, err := rl.media.Start(media.Source{
 		URL:      st.URL,
@@ -392,7 +463,7 @@ func (rl *Relay) Status() map[string]any {
 	defer rl.mu.Unlock()
 	ses := rl.ses
 	out := map[string]any{
-		"mode":     rl.mode,
+		"mode":     "auto",
 		"tv":       nil,
 		"cur_url":  truncate(rl.curURL, 120),
 		"last_err": rl.lastErr,
@@ -443,19 +514,24 @@ func extractTitle(meta string) string {
 	return "Bilibili"
 }
 
+// guessMime 猜测上游 MIME。HLS 必须用 Content-Type 判断（抖音 URL
+// 可能不带 .m3u8 后缀），所以这里只做 URL 层面的粗判，真正的判定
+// 在 media 服务器（按上游 Content-Type + URL 后缀双重判断）。
 func guessMime(u string) string {
 	l := strings.ToLower(u)
 	switch {
-	case strings.Contains(l, ".m3u8"):
-		return "application/x-mpegurl"
+	case strings.Contains(l, "mpegurl"), strings.Contains(l, ".m3u8"):
+		return "application/vnd.apple.mpegurl"
 	case strings.Contains(l, ".mpd"):
 		return "application/dash+xml"
-	case strings.Contains(l, ".ts"):
-		return "video/mp2t"
 	case strings.Contains(l, ".flv"):
 		return "video/x-flv"
 	case strings.Contains(l, ".webm"):
 		return "video/webm"
+	case strings.Contains(l, ".mp4"):
+		return "video/mp4"
+	case strings.Contains(l, ".ts"):
+		return "video/mp2t"
 	}
 	return "video/mp4"
 }

@@ -228,9 +228,7 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
       </div>
 
       <div class="bigbtns">
-        <button class="bbtn sm" onclick="ctl('stop')" title="停止">⏹</button>
-        <button class="bbtn main" id="d-play" onclick="ctl('play')" title="播放">▶</button>
-        <button class="bbtn sm" onclick="ctl('reconnect')" title="重连">⟳</button>
+        <button class="bbtn main" id="d-play" onclick="togglePlay()" title="播放/暂停">▶</button>
       </div>
 
       <div class="bigvol">
@@ -339,15 +337,22 @@ function fmtTime(sec) {
 }
 
 // ── 控制 API ──
+let curPaused = false;
+function togglePlay() {
+  // 乐观翻转本地状态，立即响应，电视回包后校准
+  curPaused = !curPaused;
+  document.getElementById('d-play').textContent = curPaused ? '▶' : '⏸';
+  ctl(curPaused ? 'play' : 'pause');
+}
 function ctl(action, arg) {
   let url = '/api/play?action='+action;
   if(arg !== undefined) url += '&arg='+encodeURIComponent(arg);
   fetch(url).then(r=>r.json()).then(d=>{
-    if(!d.ok) toast(d.msg||'操作失败', false);
+    if(!d.ok) { toast(d.msg||'操作失败', false); pollPlay(); }  // 失败则回读真实状态
     else if(action==='volume') toast('音量 '+arg);
-    else if(action==='stop') toast('已停止');
-    else if(action==='reconnect') toast('已重新推送');
-    pollPlay();
+    else if(action==='play') toast('继续播放');
+    else if(action==='pause') toast('已暂停');
+    else pollPlay();
   }).catch(()=>toast('网络错误', false));
 }
 
@@ -424,8 +429,10 @@ function pollPlay() {
     const st = (p.state||'').toUpperCase();
     const isPaused = st === 'PAUSED_PLAYBACK' || st === 'PAUSED_RECORDING';
     const isLive = st === 'PLAYING' || st === 'TRANSITIONING';
+    // 仅在电视明确返回 state 时校准（未选电视/无 state 时保留乐观状态）
+    if(p.state) curPaused = isPaused;
 
-    document.getElementById('d-play').textContent = isPaused ? '▶' : '⏸';
+    document.getElementById('d-play').textContent = curPaused ? '▶' : '⏸';
     document.getElementById('dock-live').textContent = isPaused ? 'PAUSED' : 'LIVE';
     document.getElementById('dock-live').style.background = isPaused ? 'var(--warn)' : 'var(--acc)';
     document.getElementById('dock-title').textContent = p.title || '播放中';

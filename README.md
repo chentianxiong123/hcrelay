@@ -1,54 +1,57 @@
-# hcrelay — B站投屏中继（手机当中间件）
+# hcrelay — DLNA 投屏中继（手机当中间件）
 
-把「B站 App → 电视」这条经常「越播越慢」的链路，改成：
+把「App 投屏 → 电视」这条经常「越播越慢 / 播不了」的链路，改成手机当中间件：
 
 ```
-B站 App ──SSDP发现/SOAP/NVA──> hcrelay(手机上) ──本地HTTP──> 电视(DLNA)
-                                   │
-                                   ├─ 取流(playurl/直链)
-                                   ├─ 本地重封装(ffmpeg -c copy 修时间戳)
-                                   └─ 以本地URL喂给电视，电视只拉这条干净的流
+App(B站/百度/抖音/盗版站) ──SSDP发现/SOAP/NVA──> hcrelay(手机上) ──本地HTTP──> 电视(DLNA)
+                                                      │
+                                                      ├─ 探测上游(Content-Type/防盗链)
+                                                      ├─ HLS: 重写 m3u8 分片到本机代理
+                                                      └─ 以本地URL喂电视，电视只拉这条干净的流
 ```
 
 中间件同时扮演两个角色：
 
-- **对 B站**：一台 DLNA MediaRenderer（接收端），B站 App 会 SSDP 搜到我、把播放 URL/命令发给我
-- **对电视**：一个 DLNA Controller（发送端），我把取到/重封装好的流 URL 推给电视
+- **对 App**：一台 DLNA MediaRenderer（接收端），App 会 SSDP 搜到我、把播放 URL/命令发给我
+- **对电视**：一个 DLNA Controller（发送端），我把取到的流 URL 推给电视，电视自己来拉
 
-## 为什么能解决「越来越慢」
+## 为什么能解决「越来越慢 / 播不了」
 
-普通投屏卡/慢，根因通常是这三类，中间件全都能治：
+普通投屏卡/慢/黑屏，根因通常是这几类，中间件全都能治：
 
 | 病因 | 中间件怎么治 |
 |---|---|
-| 电视拿不到/被鉴权挡（CDN 要 Referer/UA，电视没带） | proxy 模式：本地反代补 Referer/UA + Range |
-| HLS 被电视当直播播、延迟线性累积 → 越拖越慢 | hls 模式：m3u8 段 URL 重写到本机，只喂最新窗口 |
-| 源流 PTS 漂移 / 每片段时间戳错 → 整体慢动作 | remux 模式：ffmpeg -c copy 重封装成 MPEG-TS，`+genpts` 重置时间戳 |
+| CDN 要 Referer/UA 防盗链，电视没带 → 403 | proxy 反代：补 Referer/UA + Range |
+| HLS 分片是相对路径，电视解析成 `/m/000.ts` → 404 | 分片绝对 URL 用 base64 编码，重写到本机代理 |
+| 抖音等 URL 不带 `.m3u8` 后缀 → 电视当 MP4 解析失败 | 按上游 Content-Type 探测识别 HLS |
+| AES 加密 / fMP4 初始化段（`EXT-X-KEY`/`EXT-X-MAP`） | 密钥/初始化段也走本机代理 |
+| master playlist 多码率 | 子列表走 `/pl/` 递归重写 |
+| 山寨/网页客户端发畸形 SOAP（未转义 `&`） | SOAP 解析容错 + 正则兜底 |
+| 源流 PTS 漂移 / 时间戳错 → 慢动作 | remux：ffmpeg `-c copy` 重封装成 MPEG-TS |
 
 ## 目录结构
 
 ```
 hcrelay/
-├── go/          # 业务核心（server.New() 全量 handler，可被壳复用）
+├── go/                  # 业务核心（server.New() 全量 handler，可被壳复用）
 │   ├── cmd/hcrelay/     # 独立进程入口
 │   └── internal/        # ssdp / renderer / nva / upnp / bili / media / tv / relay / server
-├── wails3/      # 统一壳（安卓/桌面），见 wails3/build-android.md
+├── wails3/              # 统一壳（安卓/桌面），见 wails3/build-android.md
+├── docs/                # 技术分析与排查记录
 └── README.md
 ```
 
 ## 运行
 
 ### 手机上（Android，推荐）
-用 wails3 打包成 APK 装到手机（见下文「wails3 打包」），或 Termux 直跑：
+用 wails3 打包成 APK 装到手机（见「wails3 打包」），或 Termux 直跑：
 
 ```bash
 # Termux
-pkg install golang ffmpeg
+pkg install golang
 cd /path/to/hcrelay/go
 go build -o hcrelay ./cmd/hcrelay && ./hcrelay
 ```
-
-> 手机上必须能访问 ffmpeg（`pkg install ffmpeg`），remux 模式才有效；没有 ffmpeg 用 proxy 模式。
 
 ### 电脑/盒子上
 ```bash
@@ -71,7 +74,6 @@ cd go && go build -o hcrelay ./cmd/hcrelay && ./hcrelay
 cd wails3
 ./build-android.sh            # arm64 真机（默认）
 ./build-android.sh amd64      # 模拟器
-# 或 task android:package ARCH=arm64
 ```
 
 安卓已适配：
@@ -83,30 +85,49 @@ cd wails3
 细节见 `wails3/build-android.md`。
 
 ## 打开控制台
-浏览器访问 `http://<手机IP>:8080/ui`（手机端 htmx 界面）：
+浏览器访问 `http://<手机IP>:8080/ui`（移动端四页 SPA）：
 
-- **播放模式**：直连代理 / 重封装(推荐) / HLS修复
-- **电视设备**：自动扫描，点「设为目标」
-- **状态/日志**：每 2.5s 自动刷新
+- **首页**：状态卡 + 实时状态（目标电视/播放中/速度）
+- **操作台**：进度条 + 大播放/暂停按钮 + 音量 + 传输统计
+- **设备**：电视气泡选择
+- **日志**：实时日志
+- 底部 tab 导航，投屏成功后自动进操作台
+
+> 播放模式是**全自动**的（`mode=auto`），后端按上游流自动决定处理方式，
+> 普通用户不需要选择。
 
 ## 使用流程
 1. 手机装 hcrelay 并打开（SSDP 广播中）
-2. 打开 B站 App，投屏 → 应该能搜到「HomeCast Relay」
-3. 在 hcrelay 界面里把电视「设为目标」，选好播放模式
-4. B站 开始投屏 → hcrelay 接住 → 取流/重封装 → 推给电视
+2. 打开 App，投屏 → 应该能搜到「HomeCast Relay」
+3. 在 hcrelay 界面「设备」页把电视设为目标
+4. App 开始投屏 → hcrelay 接住 → 探测/重写 → 推给电视
 
-> B站 App 里「普通投屏/极速投屏」都会进 hcrelay：
-> 普通走标准 DLNA URL，极速走哔哩必连(NVA) Play 命令自行取流。
+> 支持的入口：
+> - 标准 DLNA（百度、B站普通投屏、抖音等走 SOAP SetAVTransportURI）
+> - B站「极速投屏」走哔哩必连(NVA) 私有协议
+>
+> 不支持的（协议层面，不是中继能解决的）：
+> - Google Cast（Chrome 投放按钮，走 Chromecast 协议）
+> - Miracast（系统无线投屏 = 屏幕镜像）
+> - DRM/Widevine 加密流
+> - DASH (.mpd) —— 明确报错，不做假支持
 
 ## 测试
 ```bash
-cd go && go test ./...   # SOAP/NVA/媒体(proxy+range+hls+remux)/端到端 全通过
+cd go && go test ./...
 ```
-- `TestRelayEndToEnd`：模拟 B站 SetAVTransportURI → 中间件 → 模拟电视收到本地 URL + Play
+- `TestRelayEndToEnd`：模拟 App SetAVTransportURI → 中间件 → 模拟电视收到本地 URL + Play
+- `TestGenericHLSFromAnySource`：7 种任意来源 HLS（无后缀/带query/fMP4/AES/master/绝对路径）
+- `TestPirateSiteRefererPassthrough`：盗版站防盗链 Referer 透传端到端
+- `TestParseSoapRobust`：畸形 SOAP（未转义 &）容错
 - `TestRemuxProducesTS`：真实 mp4 → ffmpeg 重封装 → 有效 MPEG-TS（0x47 开头）
-- `TestHandshakeAndPlayCommand`：NVA 握手 + Play{aid,cid} 解析 + 应答
+
+## 文档
+见 `docs/`：
+- `2026-10-29-DLNA投屏HLS全404排查修复.md` — HLS 分片 404 根因与修复
+- `2026-10-29-手机CPU转码能力实测评估.md` — 手机转码能撑多少码率（实测+估算）
 
 ## 说明
 - 纯 Go 标准库 + goupnp（控制电视）；交叉编译到 Android/arm64 通过
-- 需要 `ffmpeg` 在 PATH 里才能用 remux 模式；没有则用 proxy 模式
-- 仅个人自用，勿公开分发
+- proxy 模式是默认，零依赖零 CPU（字节搬运）；remux 需 ffmpeg（可选）
+- 数据不经过手机解码/转码路径 → 手机只是字节搬运，CPU 占用≈0

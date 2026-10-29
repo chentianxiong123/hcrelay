@@ -33,6 +33,13 @@ type Relay struct {
 	ses     *media.Session
 	curURL  string // 上游原始 URL（B站给的）
 	lastErr string
+	// startedAt 最近一次成功建立会话的时间。
+	//
+	// B站 切换视频时会先发 Stop 再发 Play；但 Stop 可能乱序晚到，
+	// 在新会话刚建立几秒内到达，误杀正在播的新视频。
+	// 所以 App 发来的 Stop 若在会话建立后 6 秒内到达，视为迟到的
+	// 重复命令，忽略。UI 手动停止不受此限制。
+	startedAt time.Time
 	// 事件日志
 	Logs []string
 }
@@ -231,7 +238,7 @@ func (rl *Relay) onRendererEvent(e renderer.Event) {
 		rl.controlTV("pause", "", 0)
 	case "stop":
 		rl.logf("B站 下发 Stop")
-		rl.stopRelay()
+		rl.stopRelay(true)
 	case "seek":
 		rl.logf("B站 Seek -> %s", e.Pos)
 		rl.controlTV("seek", e.Pos, 0)
@@ -259,7 +266,7 @@ func (rl *Relay) HandleNVACmd(name string, args map[string]any) (map[string]any,
 	case "Resume":
 		rl.controlTV("play", "", 0)
 	case "Stop":
-		rl.stopRelay()
+		rl.stopRelay(true)
 	case "Seek":
 		if v, ok := args["seekTs"].(float64); ok {
 			rl.controlTV("seek", fmtFloat(v), 0)
@@ -384,6 +391,7 @@ func (rl *Relay) startRelay(upstreamURL, meta string, _ int, fromReferer, fromUA
 	}
 	rl.mu.Lock()
 	rl.ses = ses
+	rl.startedAt = time.Now()
 	rl.mu.Unlock()
 	rl.logf("媒体会话就绪: %s (%s)", ses.URL, ses.Type)
 
@@ -423,6 +431,7 @@ func (rl *Relay) startRelayByCID(aid, cid string) {
 	}
 	rl.mu.Lock()
 	rl.ses = ses
+	rl.startedAt = time.Now()
 	rl.mu.Unlock()
 	rl.logf("媒体会话就绪: %s", ses.URL)
 	rl.pushToTV(ses)
@@ -456,15 +465,32 @@ func (rl *Relay) pushToTV(ses *media.Session) {
 	rl.setErr("")
 }
 
-func (rl *Relay) stopRelay() {
+// stopRelay 停止当前会话。
+//
+// fromApp 表示这个 Stop 来自 App（NVA 事件/命令），不是用户手动点 UI。
+// App 切换视频时会先发 Stop 再发 Play，但 Stop 可能乱序晚到，在新会话
+// 刚建立几秒内到达，误杀正在播的新视频。所以 App 的 Stop 若在会话建立
+// 后 stopGuardWindow 内到达，视为迟到的重复命令，忽略。
+const stopGuardWindow = 6 * time.Second
+
+func (rl *Relay) stopRelay(fromApp bool) {
 	rl.mu.Lock()
 	ses := rl.ses
+	if ses == nil {
+		rl.mu.Unlock()
+		return
+	}
+	// App 发来的 Stop，且会话刚建立（切换序列的迟到 Stop）→ 忽略
+	if fromApp && time.Since(rl.startedAt) < stopGuardWindow {
+		rl.mu.Unlock()
+		rl.logf("忽略迟到的 App Stop（会话建立 %d ms，疑为切换重复命令）",
+			time.Since(rl.startedAt).Milliseconds())
+		return
+	}
 	rl.ses = nil
 	rl.mu.Unlock()
-	if ses != nil {
-		rl.media.Stop(ses.ID)
-		rl.logf("停止媒体会话 %s", ses.ID)
-	}
+	rl.media.Stop(ses.ID)
+	rl.logf("停止媒体会话 %s", ses.ID)
 	rl.controlTV("stop", "", 0)
 }
 
@@ -478,7 +504,7 @@ func (rl *Relay) Control(action, arg string) error {
 	rl.mu.Unlock()
 
 	if action == "stop" {
-		rl.stopRelay()
+		rl.stopRelay(false)
 		return nil
 	}
 	if action == "reconnect" {

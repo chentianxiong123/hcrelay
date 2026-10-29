@@ -57,6 +57,9 @@ type Session struct {
 	// 速度采样
 	lastBytes int64
 	lastTime  time.Time
+	// PTS 重置器（跨分片共享基准，保持时间戳连续；仅 TS 流启用）
+	ptsMu  sync.Mutex
+	ptsRew *ptsRewriter
 }
 
 // Progress 播放进度
@@ -223,6 +226,17 @@ func (s *Session) SessionProgress() Progress {
 		p.Elapsed = time.Since(start).Seconds()
 	}
 	return p
+}
+
+// ptsRewriter 返回本会话的 PTS 重置器（惰性创建，跨分片共享基准）。
+// 返回 nil 表示该会话不该启用 PTS 重置（非 TS 流）。
+func (s *Session) ptsRewriter() *ptsRewriter {
+	s.ptsMu.Lock()
+	defer s.ptsMu.Unlock()
+	if s.ptsRew == nil {
+		s.ptsRew = newPTSRewriter(0)
+	}
+	return s.ptsRew
 }
 
 // setTotal 记录上游总长度
@@ -474,6 +488,21 @@ func (s *Server) proxyUpstream(w http.ResponseWriter, r *http.Request, upstream 
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
+
+	// MPEG-TS 流：启用 PTS 重置（治长时间播放音画一起变慢/卡顿）。
+	// 原理：源 PES 时间戳有累积漂移，电视按 PTS 播就越来越慢。
+	// 重置器把每个 PES 的 PTS 重写为连续、速率 1.0 的值。
+	// 仅对 video/mp2t 或 .ts 分片启用（fMP4/播放列表不处理）。
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	isTS := strings.Contains(ct, "mp2t") || strings.Contains(ct, "mpeg")
+	if isTS && r.Method != "HEAD" {
+		rw := ses.ptsRewriter()
+		if rw != nil {
+			body := newTSRewriteReader(resp.Body, rw)
+			_, _ = io.Copy(w, &countWriter{w: body, s: ses})
+			return
+		}
+	}
 	_, _ = io.Copy(w, &countWriter{w: resp.Body, s: ses})
 }
 

@@ -27,6 +27,14 @@ type Event struct {
 	Meta string
 	Pos  string
 	Vol  int
+	// Referer 是发起投屏那个请求的 Referer 头。
+	//
+	// 关键：App/浏览器在 SetAVTransportURI 时会把自己的 Referer 带上，
+	// 那正是用户正在看的网站域名（比如盗版站）。而很多盗版站的 CDN
+	// 会校验 Referer 是否属于自己的域名 —— 猜是猜不出来的，只能透传。
+	Referer string
+	// UA 是发起投屏那个请求的 User-Agent，同样透传给上游更安全。
+	UA string
 }
 
 // Renderer 接收端
@@ -179,7 +187,15 @@ func (r *Renderer) handleAVTransport(w http.ResponseWriter, req *http.Request) {
 		r.state.Meta = soap.Args["CurrentURIMetaData"]
 		r.state.State = "TRANSITIONING"
 		r.mu.Unlock()
-		r.emit(Event{Type: "uri", URI: soap.Args["CurrentURI"], Meta: soap.Args["CurrentURIMetaData"]})
+		// 透传发起方的 Referer / UA：盗版站等不知名站点的 CDN
+		// 会校验 Referer 是否为自己的域名，猜不出来只能原样带过去。
+		r.emit(Event{
+			Type:     "uri",
+			URI:      soap.Args["CurrentURI"],
+			Meta:     soap.Args["CurrentURIMetaData"],
+			Referer:  req.Header.Get("Referer"),
+			UA:       req.Header.Get("User-Agent"),
+		})
 		r.soapOK(w, soap.Action, map[string]string{})
 	case "SetNextAVTransportURI":
 		r.soapOK(w, soap.Action, map[string]string{})

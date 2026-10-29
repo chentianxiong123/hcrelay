@@ -160,9 +160,11 @@ func New(opts Options) *Instance {
 		}
 		writeJSON(w, map[string]any{"ok": false, "msg": "设备已离线，重新扫描"})
 	})
+	// 模式对普通用户不可见。后端只认 auto（自动识别），
+	// 忽略其它值，避免误切到 remux（手机上没有 ffmpeg）等内部选项。
 	mux.HandleFunc("/api/mode", func(w http.ResponseWriter, rq *http.Request) {
-		rl.SetMode(media.Mode(rq.URL.Query().Get("mode")))
-		writeJSON(w, map[string]any{"ok": true})
+		rl.SetMode(media.ModeAuto)
+		writeJSON(w, map[string]any{"ok": true, "mode": "auto"})
 	})
 	mux.HandleFunc("/api/tv/scan", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"ok": true, "tvs": tvList()})

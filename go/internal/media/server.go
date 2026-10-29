@@ -398,7 +398,25 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request, ses *Sessio
 		s.handleHLSTop(w, r, ses)
 		return
 	}
+	// DASH（.mpd）：本项目只实现了 HLS 与普通文件的代理，
+	// 没有 DASH 清单重写能力。透传 mpd 给电视基本都会失败，
+	// 所以明确报错，不浪费电视端的时间。
+	if isDASHURL(ses.Src.URL) || isDASHType(ses.Src.MimeType) {
+		http.Error(w, "暂不支持 DASH (.mpd) 格式，请改用 HLS 或普通视频",
+			http.StatusNotImplemented)
+		return
+	}
 	s.proxyUpstream(w, r, ses.Src.URL, ses)
+}
+
+// isDASHURL 判断 URL 是否是 DASH 清单
+func isDASHURL(u string) bool {
+	return strings.Contains(strings.ToLower(u), ".mpd")
+}
+
+// isDASHType 判断 Content-Type 是否是 DASH
+func isDASHType(t string) bool {
+	return strings.Contains(strings.ToLower(t), "dash+xml")
 }
 
 // proxyUpstream 反代指定上游 URL（补 Referer/UA，支持 Range）

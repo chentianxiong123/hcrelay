@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -21,6 +22,61 @@ type SoapRequest struct {
 }
 
 // ParseSoap 解析 SOAP body
+// sanitizeXML 把裸 & 转义成 &amp;，让畸形 SOAP 也能解析。
+// 很多山寨/网页 DLNA 客户端会把 URL 里的 ?a=1&b=2 原样塞进 XML，
+// 导致标准 xml 解码失败。这里手动扫描，把不是合法实体的 & 转义。
+func sanitizeXML(raw string) string {
+	if !strings.Contains(raw, "&") {
+		return raw
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '&' {
+			b.WriteByte(raw[i])
+			continue
+		}
+		// 是 &：往后看是不是合法实体（&#N; &#xN; &name;）
+		j := strings.IndexByte(raw[i:], ';')
+		if j > 0 && j <= 12 {
+			body := raw[i+1 : i+j]
+			if isValidEntity(body) {
+				b.WriteString(raw[i : i+j+1]) // 原样保留
+				i += j
+				continue
+			}
+		}
+		b.WriteString("&amp;") // 裸 & → 转义
+	}
+	return b.String()
+}
+
+// isValidEntity 判断分号前的实体体是否合法（amp/lt/gt/quot/apos/#N/#xN）
+func isValidEntity(body string) bool {
+	switch body {
+	case "amp", "lt", "gt", "quot", "apos":
+		return true
+	}
+	if len(body) < 2 || body[0] != '#' {
+		return false
+	}
+	// &#123; 或 &#x1F;
+	digits := body[1:]
+	if len(digits) > 1 && (digits[0] == 'x' || digits[0] == 'X') {
+		digits = digits[1:]
+	}
+	if digits == "" {
+		return false
+	}
+	for _, c := range digits {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func ParseSoap(r *http.Request) (*SoapRequest, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -37,7 +93,8 @@ func ParseSoap(r *http.Request) (*SoapRequest, error) {
 	}
 
 	// 递归遍历：找 Body 的直接子元素（= action），收集其子元素为 key=value
-	dec := xml.NewDecoder(strings.NewReader(raw))
+	// 先做容错：转义裸 &，避免畸形客户端导致解析中断
+	dec := xml.NewDecoder(strings.NewReader(sanitizeXML(raw)))
 	var stack []xml.Name
 	for {
 		tok, err := dec.Token()
@@ -67,6 +124,14 @@ func ParseSoap(r *http.Request) (*SoapRequest, error) {
 			if len(stack) > 0 {
 				stack = stack[:len(stack)-1]
 			}
+		}
+	}
+
+	// 兜底：如果当前 URI 没解析到（极端畸形 XML 把 DecodeElement 搞崩了），
+	// 用正则直接从原文抠出关键参数。
+	if req.Args["CurrentURI"] == "" {
+		if m := regexp.MustCompile(`(?s)<CurrentURI>\s*(.*?)\s*</CurrentURI>`).FindStringSubmatch(raw); m != nil {
+			req.Args["CurrentURI"] = strings.TrimSpace(m[1])
 		}
 	}
 	return req, nil

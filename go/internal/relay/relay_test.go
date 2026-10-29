@@ -63,6 +63,14 @@ func TestRelayEndToEnd(t *testing.T) {
 	tvSrv := httptest.NewServer(fake.handler())
 	defer tvSrv.Close()
 
+	// 模拟上游（本地 mock，避免真的请求 example.com）
+	upSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", "4")
+		w.Write([]byte{0, 0, 0, 0})
+	}))
+	defer upSrv.Close()
+
 	// 渲染端（接收 B站）
 	renderer := renderer.New("http://127.0.0.1:9999", "uuid:test", "Relay", renderer.Services{AVTransport: true, RenderingCtrl: true, ConnMgr: true})
 
@@ -74,7 +82,7 @@ func TestRelayEndToEnd(t *testing.T) {
 	rl.SelectTV(&ssdp.Device{Name: "FakeTV", Location: tvSrv.URL + "/description.xml"})
 
 	// 模拟 B站 App 投屏：SetAVTransportURI + Play
-	body := `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>http://example.com/bili/video.mp4</CurrentURI><CurrentURIMetaData>&lt;DIDL-Lite&gt;&lt;dc:title&gt;测试视频&lt;/dc:title&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData></u:SetAVTransportURI></s:Body></s:Envelope>`
+	body := `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>` + upSrv.URL + `/bili/video.mp4</CurrentURI><CurrentURIMetaData>&lt;DIDL-Lite&gt;&lt;dc:title&gt;测试视频&lt;/dc:title&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData></u:SetAVTransportURI></s:Body></s:Envelope>`
 	req := httptest.NewRequest("POST", "/ctl/AVTransport", strings.NewReader(body))
 	req.Header.Set("SOAPAction", `"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"`)
 	rr := httptest.NewRecorder()

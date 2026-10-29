@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,9 +68,15 @@ func (rl *Relay) setErr(msg string) {
 	rl.mu.Unlock()
 }
 
-// Mode 设置播放模式（保留给内部/调试用；普通用户不需要选）
+// SetMode 设置播放模式。
+//
+// 面向普通用户：只有「自动」一种。保留参数是为了将来内部调试，
+// 但 remux 依赖 ffmpeg（手机上没有），所以只接受 auto/proxy/hls，
+// remux 会被忽略。
 func (rl *Relay) SetMode(m media.Mode) {
-	if m != media.ModeAuto && m != media.ModeProxy && m != media.ModeHLS && m != media.ModeRemux {
+	switch m {
+	case media.ModeAuto, media.ModeProxy, media.ModeHLS:
+	default:
 		return
 	}
 	rl.mu.Lock()
@@ -108,15 +115,25 @@ func isHLSURL(u string) bool {
 }
 
 // probeMime 探测上游真实 Content-Type（只读前几 KB，不下载整个流）。
+//
 // 抖音等来源的 HLS URL 不带 .m3u8 后缀，只能靠响应头判断；
 // 探到播放列表就把 mime 改成 mpegurl，让推给电视的 DIDL 正确。
+//
+// 探测同时也是「能不能拿到流」的一次真实尝试：如果防盗链导致 403，
+// 这里就会拿到失败信息，交给调用方换 Referer 策略重试。
 func probeMime(ctx context.Context, rawURL, referer, ua string) string {
+	ct, _ := probeUpstream(ctx, rawURL, referer, ua)
+	return ct
+}
+
+// probeUpstream 试拉上游，返回 Content-Type 和 HTTP 状态码
+func probeUpstream(ctx context.Context, rawURL, referer, ua string) (string, int) {
 	if isHLSURL(rawURL) {
-		return "application/vnd.apple.mpegurl"
+		// URL 明确是 m3u8，但要确认能不能拿到（防盗链）
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return ""
+		return "", 0
 	}
 	req.Header.Set("User-Agent", ua)
 	if referer != "" {
@@ -126,7 +143,7 @@ func probeMime(ctx context.Context, rawURL, referer, ua string) string {
 	req.Header.Set("Range", "bytes=0-1023")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return ""
+		return "", 0
 	}
 	defer resp.Body.Close()
 	ct := resp.Header.Get("Content-Type")
@@ -136,10 +153,65 @@ func probeMime(ctx context.Context, rawURL, referer, ua string) string {
 		buf := make([]byte, 16)
 		n, _ := resp.Body.Read(buf)
 		if n > 0 && strings.HasPrefix(strings.TrimSpace(string(buf[:n])), "#EXTM3U") {
-			return "application/vnd.apple.mpegurl"
+			return "application/vnd.apple.mpegurl", resp.StatusCode
 		}
 	}
-	return ct
+	return ct, resp.StatusCode
+}
+
+// upstreamErrorMsg 把上游 HTTP 状态码翻译成人能看懂的话（给妈妈看）
+func upstreamErrorMsg(code int) string {
+	switch code {
+	case 401:
+		return "链接需要登录或已过期"
+	case 403:
+		return "网站防盗链拒绝访问（链接可能有时效）"
+	case 404:
+		return "链接已失效"
+	case 410:
+		return "链接已失效"
+	case 429:
+		return "网站限流了，等一会儿再试"
+	case 500, 502, 503, 504:
+		return "网站服务器出错，稍后再试"
+	}
+	return fmt.Sprintf("拉取失败（HTTP %d）", code)
+}
+
+// refererCandidates 给定 URL 和 App 自带 Referer，列出可以尝试的
+// Referer 候选（按优先级）。
+//
+// 不知名站点 / 盗版站的防盗链要求 Referer 是站点自己的域名，
+// 这个域名只能从 App 发来的请求头里拿到；拿不到时依次降级。
+func refererCandidates(upstreamURL, appReferer string) []string {
+	var out []string
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		// 过滤本地地址 / 无意义的 referer
+		if strings.Contains(s, "127.0.0.1") || strings.Contains(s, "192.168.") ||
+			strings.Contains(s, "localhost") {
+			return
+		}
+		for _, e := range out {
+			if e == s {
+				return
+			}
+		}
+		out = append(out, s)
+	}
+	// 1. App 自带（最准）
+	add(appReferer)
+	// 2. 按域名猜测
+	guess, _ := guessHeaders(upstreamURL)
+	add(guess)
+	// 3. 同源（去掉 path，保留 origin）—— 盗版站常见
+	if u, err := url.Parse(upstreamURL); err == nil && u.Host != "" {
+		add(u.Scheme + "://" + u.Host + "/")
+	}
+	return out
 }
 
 // onRendererEvent 渲染端事件回调
@@ -150,7 +222,7 @@ func (rl *Relay) onRendererEvent(e renderer.Event) {
 		rl.mu.Lock()
 		rl.curURL = e.URI
 		rl.mu.Unlock()
-		rl.startRelay(e.URI, e.Meta, 0)
+		rl.startRelay(e.URI, e.Meta, 0, e.Referer, e.UA)
 	case "play":
 		rl.logf("B站 下发 Play")
 		rl.controlTV("play", "", 0)
@@ -181,7 +253,7 @@ func (rl *Relay) HandleNVACmd(name string, args map[string]any) (map[string]any,
 	case "PlayUrl":
 		u, _ := args["url"].(string)
 		rl.logf("  PlayUrl %s", truncate(u, 80))
-		rl.startRelay(u, "", 0)
+		rl.startRelay(u, "", 0, "", "")
 	case "Pause":
 		rl.controlTV("pause", "", 0)
 	case "Resume":
@@ -219,7 +291,11 @@ func (rl *Relay) controlTV(action, target string, volume int) {
 }
 
 // startRelay 从标准 DLNA 拿到的 URL 开始中继
-func (rl *Relay) startRelay(upstreamURL, meta string, _ int) {
+//
+// fromReferer / fromUA 是发起投屏那个请求的头。
+// 盗版站、不知名站点的 CDN 普遍校验 Referer（必须是自己站点的域名），
+// 这种东西猜不出来，只能把 App 发过来时自带的 Referer 原样透传。
+func (rl *Relay) startRelay(upstreamURL, meta string, _ int, fromReferer, fromUA string) {
 	if upstreamURL == "" {
 		rl.setErr("空 URL")
 		return
@@ -227,17 +303,71 @@ func (rl *Relay) startRelay(upstreamURL, meta string, _ int) {
 
 	title := extractTitle(meta)
 	referer, ua := guessHeaders(upstreamURL)
-	// 探测上游真实 MIME：抖音等 HLS URL 不带 .m3u8 后缀，
-	// 不探测的话电视会把它当 MP4 而解析失败
-	probeCtx, probeCancel := context.WithTimeout(context.Background(), 6*time.Second)
-	realMime := probeMime(probeCtx, upstreamURL, referer, ua)
+	// App 自带的 Referer 优先（它才是真实来源站点的域名）
+	if fromReferer != "" {
+		referer = fromReferer
+	}
+	if fromUA != "" {
+		ua = fromUA
+	}
+
+	// 探测上游：依次尝试候选 Referer（App 自带 → 域名猜测 → 同源 origin）。
+	// 盗版站等不知名站点的防盗链靠 Referer，猜不到就试不出真相。
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	mime := ""
+	status := 0
+	tried := refererCandidates(upstreamURL, fromReferer)
+	for _, cand := range tried {
+		ct, code := probeUpstream(probeCtx, upstreamURL, cand, ua)
+		status = code
+		if code == 200 || code == 206 {
+			mime = ct
+			referer = cand
+			break
+		}
+	}
 	probeCancel()
-	mime := guessMime(upstreamURL)
-	if realMime != "" {
-		mime = realMime
+
+	// 探测失败时的处理：
+	//   - 404/410：链接确定没了 → 直接报错
+	//   - 403/401：防盗链或需登录 → 先试一次「不带 Referer」和「同源 origin」，
+	//     还不行就报错（电视拿不到也是白转圈）
+	//   - 其它（网络抖动/5xx）：先推给电视试，电视侧还会再拉一次
+	if status != 200 && status != 206 && status != 0 {
+		if status == 404 || status == 410 {
+			rl.setErr(upstreamErrorMsg(status))
+			rl.logf("上游 %d，链接已失效: %s", status, truncate(upstreamURL, 60))
+			return
+		}
+		if status == 403 || status == 401 {
+			// 最后再试一次：不带 Referer（有些站点反而放行）
+			probeCtx2, cancel2 := context.WithTimeout(context.Background(), 8*time.Second)
+			ct2, code2 := probeUpstream(probeCtx2, upstreamURL, "", ua)
+			cancel2()
+			if code2 == 200 || code2 == 206 {
+				mime = ct2
+				referer = ""
+				status = code2
+			} else {
+				rl.setErr(upstreamErrorMsg(status))
+				rl.logf("上游 %d，疑似防盗链（已试 %d 种 Referer + 无 Referer）: %s",
+					status, len(tried), truncate(upstreamURL, 60))
+				return
+			}
+		}
+	}
+	if mime == "" {
+		mime = guessMime(upstreamURL)
 	}
 	if strings.Contains(strings.ToLower(mime), "mpegurl") {
 		mime = "application/vnd.apple.mpegurl"
+	}
+	// DASH 明确不支持，提前报错，不要把 mpd 推给电视让它干等
+	if strings.Contains(strings.ToLower(mime), "dash+xml") ||
+		strings.Contains(strings.ToLower(upstreamURL), ".mpd") {
+		rl.setErr("暂不支持 DASH (.mpd) 格式")
+		rl.logf("暂不支持 DASH 格式: %s", truncate(upstreamURL, 80))
+		return
 	}
 	src := media.Source{
 		URL:      upstreamURL,
@@ -536,11 +666,38 @@ func guessMime(u string) string {
 	return "video/mp4"
 }
 
-// guessHeaders B站 CDN 有防盗链（Referer/UA 校验），无条件带上最保险。
-// 不管域名是不是 bilivideo.com，都补上 B站 Referer 和移动端 UA。
+// guessHeaders 为上游请求补 Referer / UA。
+//
+// B站 CDN 有防盗链（校验 Referer/UA），无条件带上最保险。
+// 但抖音/爱奇艺等来源如果带上 bilibili 的 Referer 反而会被拒，
+// 所以按域名分流：认得的就用对应的，认不出的用不带 Referer 的
+// 移动端 UA（大多数 CDN 对无 Referer 是放行的）。
 func guessHeaders(u string) (referer, ua string) {
-	return "https://www.bilibili.com/",
-		"Mozilla/5.0 (Linux; Android 13; SM-S9180) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
+	ua = "Mozilla/5.0 (Linux; Android 13; SM-S9180) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
+	l := strings.ToLower(u)
+	switch {
+	case strings.Contains(l, "bilivideo.com"), strings.Contains(l, "bilibili.com"),
+		strings.Contains(l, "bfllvip.com"), strings.Contains(l, "biliapi.net"):
+		return "https://www.bilibili.com/", ua
+	case strings.Contains(l, "douyinvod.com"), strings.Contains(l, "douyin.com"),
+		strings.Contains(l, "bytecdn.cn"), strings.Contains(l, "zjcdn.com"),
+		strings.Contains(l, "ixigua.com"), strings.Contains(l, "pstatp.com"):
+		return "https://www.douyin.com/", ua
+	case strings.Contains(l, "baidu.com"), strings.Contains(l, "bdstatic.com"),
+		strings.Contains(l, "bcebos.com"):
+		return "https://www.baidu.com/", ua
+	case strings.Contains(l, "youku.com"), strings.Contains(l, "tudou.com"),
+		strings.Contains(l, "alicdn.com"), strings.Contains(l, "aliyuncs.com"):
+		return "https://www.youku.com/", ua
+	case strings.Contains(l, "iqiyi.com"), strings.Contains(l, "qiyi.com"),
+		strings.Contains(l, "qiyipic.com"):
+		return "https://www.iqiyi.com/", ua
+	case strings.Contains(l, "qq.com"), strings.Contains(l, "gtimg.com"),
+		strings.Contains(l, "v.qq.com"):
+		return "https://v.qq.com/", ua
+	}
+	// 认不出的来源：不带 Referer，只带移动端 UA
+	return "", ua
 }
 
 func truncate(s string, n int) string {

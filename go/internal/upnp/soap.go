@@ -72,12 +72,17 @@ func ParseSoap(r *http.Request) (*SoapRequest, error) {
 	return req, nil
 }
 
-// SoapResponse 生成 SOAP 成功应答
+// SoapResponse 生成 SOAP 成功应答（默认 AVTransport 命名空间）
 func SoapResponse(action SoapAction, args map[string]string) string {
+	return SoapResponseNS("urn:schemas-upnp-org:service:AVTransport:1", action, args)
+}
+
+// SoapResponseNS 生成指定服务命名空间的 SOAP 成功应答
+func SoapResponseNS(ns string, action SoapAction, args map[string]string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n")
 	b.WriteString(`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>`)
-	b.WriteString(`<u:` + string(action) + `Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">`)
+	b.WriteString(`<u:` + string(action) + `Response xmlns:u="` + ns + `">`)
 	for k, v := range args {
 		fmt.Fprintf(&b, `<%s>%s</%s>`, k, Escape(v), k)
 	}

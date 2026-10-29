@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"hcrelay/internal/bili"
@@ -60,7 +62,7 @@ func New(opts Options) *Instance {
 	}
 	uuid := opts.UUID
 	if uuid == "" {
-		uuid = "uuid:00000000-0000-0000-0000-00000000relay"
+		uuid = newUUID()
 	}
 	name := opts.Name
 	if name == "" {
@@ -177,8 +179,50 @@ func New(opts Options) *Instance {
 		_ = tpl.ExecuteTemplate(w, "index.html", data)
 	})
 
-	inst.Handler = mux
+	inst.Handler = logRequests(mux)
 	return inst
+}
+
+// logRequests 给每个 HTTP 请求打一行访问日志（诊断 DLNA 客户端行为用）
+// 跳过 UI 自己的高频轮询，避免刷屏
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, rq *http.Request) {
+		p := rq.URL.Path
+		quiet := p == "/ui" || p == "/favicon.ico" || strings.HasPrefix(p, "/api/")
+		if quiet {
+			next.ServeHTTP(w, rq)
+			return
+		}
+		rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rec, rq)
+		log.Printf("[http] %s %s from %s ua=%q -> %d",
+			rq.Method, rq.URL.RequestURI(), rq.RemoteAddr, rq.UserAgent(), rec.code)
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	code int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.code = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// newUUID 生成合法的 RFC4122 v4 UUID（部分 DLNA 客户端会校验 USN 里的 UUID 格式）
+func newUUID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// 极少概率失败，退化为时间戳派生
+		n := time.Now().UnixNano()
+		for i := range b {
+			b[i] = byte(n >> (uint(i%8) * 8))
+		}
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant RFC4122
+	return fmt.Sprintf("uuid:%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // Stop 停后台服务

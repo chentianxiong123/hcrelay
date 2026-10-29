@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -102,7 +103,12 @@ func (a *Advertiser) serve() {
 			continue
 		}
 		st := headerValue(req, "ST")
-		if st == "" || !a.matchesST(st) {
+		man := headerValue(req, "MAN")
+		mx := headerValue(req, "MX")
+		match := st != "" && a.matchesST(st)
+		log.Printf("[ssdp] M-SEARCH from %s ST=%q MAN=%q MX=%q -> %s",
+			src, st, man, mx, map[bool]string{true: "RESPOND", false: "IGNORE"}[match])
+		if !match {
 			continue
 		}
 		a.replySearch(src, st)
@@ -149,13 +155,14 @@ func (a *Advertiser) replySearch(src *net.UDPAddr, st string) {
 		usn := a.usnFor(s)
 		body := fmt.Sprintf("HTTP/1.1 200 OK\r\n"+
 			"CACHE-CONTROL: max-age=%d\r\n"+
+			"DATE: %s\r\n"+
 			"EXT:\r\n"+
 			"LOCATION: %s\r\n"+
 			"SERVER: Linux/5.0 UPnP/1.0 hcrelay/0.1\r\n"+
 			"ST: %s\r\n"+
 			"USN: %s\r\n"+
 			"BOOTID.UPNP.ORG: 1\r\n"+
-			"CONFIGID.UPNP.ORG: 1\r\n\r\n", maxAge, a.Location, s, usn)
+			"CONFIGID.UPNP.ORG: 1\r\n\r\n", maxAge, time.Now().UTC().Format(http.TimeFormat), a.Location, s, usn)
 		_, _ = conn.WriteToUDP([]byte(body), src)
 	}
 }
@@ -187,11 +194,12 @@ func (a *Advertiser) sendAlive() {
 		body := fmt.Sprintf("NOTIFY * HTTP/1.1\r\n"+
 			"HOST: %s\r\n"+
 			"CACHE-CONTROL: max-age=%d\r\n"+
+			"DATE: %s\r\n"+
 			"LOCATION: %s\r\n"+
 			"NT: %s\r\n"+
 			"NTS: ssdp:alive\r\n"+
 			"SERVER: Linux/5.0 UPnP/1.0 hcrelay/0.1\r\n"+
-			"USN: %s\r\n\r\n", multicastAddr, maxAge, a.Location, st, a.usnFor(st))
+			"USN: %s\r\n\r\n", multicastAddr, maxAge, time.Now().UTC().Format(http.TimeFormat), a.Location, st, a.usnFor(st))
 		_, _ = conn.WriteToUDP([]byte(body), dst)
 	}
 }

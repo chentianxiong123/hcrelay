@@ -110,18 +110,26 @@ func (a *Advertiser) serve() {
 }
 
 func (a *Advertiser) matchesST(st string) bool {
-	types := append([]string{
-		"upnp:rootdevice",
-		"urn:schemas-upnp-org:device:MediaRenderer:1",
-		"urn:schemas-upnp-org:service:AVTransport:1",
-		"urn:schemas-upnp-org:service:RenderingControl:1",
-	}, a.ExtraTypes...)
-	for _, t := range types {
+	if st == "ssdp:all" {
+		return true
+	}
+	for _, t := range a.allTypes() {
 		if st == t {
 			return true
 		}
 	}
 	return false
+}
+
+// allTypes 返回本设备能响应的所有 ST 类型
+func (a *Advertiser) allTypes() []string {
+	return append([]string{
+		"upnp:rootdevice",
+		"urn:schemas-upnp-org:device:MediaRenderer:1",
+		"urn:schemas-upnp-org:service:AVTransport:1",
+		"urn:schemas-upnp-org:service:RenderingControl:1",
+		"urn:schemas-upnp-org:service:ConnectionManager:1",
+	}, a.ExtraTypes...)
 }
 
 // replySearch 回 M-SEARCH 的 200 OK
@@ -132,17 +140,24 @@ func (a *Advertiser) replySearch(src *net.UDPAddr, st string) {
 	if conn == nil {
 		return
 	}
-	usn := a.usnFor(st)
-	body := fmt.Sprintf("HTTP/1.1 200 OK\r\n"+
-		"CACHE-CONTROL: max-age=%d\r\n"+
-		"EXT:\r\n"+
-		"LOCATION: %s\r\n"+
-		"SERVER: Linux/5.0 UPnP/1.0 hcrelay/0.1\r\n"+
-		"ST: %s\r\n"+
-		"USN: %s\r\n"+
-		"BOOTID.UPNP.ORG: 1\r\n"+
-		"CONFIGID.UPNP.ORG: 1\r\n\r\n", maxAge, a.Location, st, usn)
-	_, _ = conn.WriteToUDP([]byte(body), src)
+	// ssdp:all 时响应所有支持的 ST；否则只响应匹配的
+	stList := []string{st}
+	if st == "ssdp:all" {
+		stList = a.allTypes()
+	}
+	for _, s := range stList {
+		usn := a.usnFor(s)
+		body := fmt.Sprintf("HTTP/1.1 200 OK\r\n"+
+			"CACHE-CONTROL: max-age=%d\r\n"+
+			"EXT:\r\n"+
+			"LOCATION: %s\r\n"+
+			"SERVER: Linux/5.0 UPnP/1.0 hcrelay/0.1\r\n"+
+			"ST: %s\r\n"+
+			"USN: %s\r\n"+
+			"BOOTID.UPNP.ORG: 1\r\n"+
+			"CONFIGID.UPNP.ORG: 1\r\n\r\n", maxAge, a.Location, s, usn)
+		_, _ = conn.WriteToUDP([]byte(body), src)
+	}
 }
 
 // notifyLoop 周期发 ssdp:alive
@@ -168,11 +183,7 @@ func (a *Advertiser) sendAlive() {
 		return
 	}
 	dst := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 1900}
-	types := append([]string{
-		"upnp:rootdevice",
-		"urn:schemas-upnp-org:device:MediaRenderer:1",
-	}, a.ExtraTypes...)
-	for _, st := range types {
+	for _, st := range a.allTypes() {
 		body := fmt.Sprintf("NOTIFY * HTTP/1.1\r\n"+
 			"HOST: %s\r\n"+
 			"CACHE-CONTROL: max-age=%d\r\n"+
@@ -193,7 +204,7 @@ func (a *Advertiser) sendByebye() {
 		return
 	}
 	dst := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 1900}
-	for _, st := range []string{"upnp:rootdevice", "urn:schemas-upnp-org:device:MediaRenderer:1"} {
+	for _, st := range a.allTypes() {
 		body := fmt.Sprintf("NOTIFY * HTTP/1.1\r\n"+
 			"HOST: %s\r\n"+
 			"NT: %s\r\n"+

@@ -57,9 +57,20 @@ type Session struct {
 	// 速度采样
 	lastBytes int64
 	lastTime  time.Time
-	// PTS 重置器（跨分片共享基准，保持时间戳连续；仅 TS 流启用）
-	ptsMu  sync.Mutex
-	ptsRew *ptsRewriter
+	// HLS 分片表（按 m3u8 顺序记录 EXTINF 时长与 URL，用于跨分片连续时间戳）
+	segMu    sync.Mutex
+	segments []segInfo
+}
+
+// segInfo 一个 HLS 分片的信息
+//
+// 分片时间戳连续性：B站 等源的每个分片独立编码，PTS 起点没有精确对齐，
+// 电视播到某个分片边界时时间戳跳变 → 解码器爆音+卡顿，并降速锁定回不来。
+// 所以重写时间戳时**彻底忽略源分片时间戳绝对值**，只用 m3u8 的 EXTINF 累加
+// 作为每个分片的时间戳起点，让电视收到的是一根全局连续的时间线。
+type segInfo struct {
+	URL string  // 分片绝对 URL（用于匹配请求）
+	Dur float64 // EXTINF 时长（秒）
 }
 
 // Progress 播放进度
@@ -228,15 +239,44 @@ func (s *Session) SessionProgress() Progress {
 	return p
 }
 
-// ptsRewriter 返回本会话的 PTS 重置器（惰性创建，跨分片共享基准）。
-// 返回 nil 表示该会话不该启用 PTS 重置（非 TS 流）。
-func (s *Session) ptsRewriter() *ptsRewriter {
-	s.ptsMu.Lock()
-	defer s.ptsMu.Unlock()
-	if s.ptsRew == nil {
-		s.ptsRew = newPTSRewriter(0)
+// recordSegment 记录一个分片（EXTINF 时长 + URL），按 m3u8 顺序追加。
+// 按 URL 去重：电视可能多次拉同一播放列表，去重避免分片表翻倍导致
+// 后续分片的时间戳起点计算错误（起点=前面所有分片时长之和）。
+func (s *Server) recordSegment(sessionID, url string, dur float64) {
+	s.mu.Lock()
+	ses := s.sessions[sessionID]
+	s.mu.Unlock()
+	if ses == nil {
+		return
 	}
-	return s.ptsRew
+	ses.segMu.Lock()
+	defer ses.segMu.Unlock()
+	// 已记录过该分片（重复拉播放列表）→ 跳过
+	for _, seg := range ses.segments {
+		if seg.URL == url {
+			return
+		}
+	}
+	ses.segments = append(ses.segments, segInfo{URL: url, Dur: dur})
+}
+
+// segmentStartPTS 返回某分片的时间戳起点（90kHz）。
+// = 前面所有分片 EXTINF 时长之和。这是跨分片连续时间线的关键：
+// 完全忽略源分片的时间戳绝对值，只用 m3u8 的时长累加。
+func (s *Server) segmentStartPTS(ses *Session, url string) uint64 {
+	if ses == nil {
+		return 0
+	}
+	ses.segMu.Lock()
+	defer ses.segMu.Unlock()
+	var sum float64
+	for _, seg := range ses.segments {
+		if seg.URL == url {
+			return uint64(sum * pts90k)
+		}
+		sum += seg.Dur
+	}
+	return 0
 }
 
 // setTotal 记录上游总长度
@@ -489,19 +529,20 @@ func (s *Server) proxyUpstream(w http.ResponseWriter, r *http.Request, upstream 
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	// MPEG-TS 流：启用 PTS 重置（治长时间播放音画一起变慢/卡顿）。
-	// 原理：源 PES 时间戳有累积漂移，电视按 PTS 播就越来越慢。
-	// 重置器把每个 PES 的 PTS 重写为连续、速率 1.0 的值。
-	// 仅对 video/mp2t 或 .ts 分片启用（fMP4/播放列表不处理）。
+	// MPEG-TS 流：启用 PTS 重置（治长时间播放音画变慢/卡顿/爆破音）。
+	// 原理：B站 等源的分片独立编码，PTS 起点没精确对齐，电视播到分片
+	// 边界时时间戳跳变，解码器爆音+卡顿并降速锁定。重置器**忽略源分片
+	// 时间戳绝对值**，用 m3u8 的 EXTINF 累加作为本分片时间戳起点（跨分片
+	// 全局连续），分片内用源相对偏移 → 电视收到连续时间线，不会崩。
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	isTS := strings.Contains(ct, "mp2t") || strings.Contains(ct, "mpeg")
 	if isTS && r.Method != "HEAD" {
-		rw := ses.ptsRewriter()
-		if rw != nil {
-			body := newTSRewriteReader(resp.Body, rw)
-			_, _ = io.Copy(w, &countWriter{w: body, s: ses})
-			return
-		}
+		// 本分片的时间戳起点 = 前面所有分片 EXTINF 之和（跨分片连续）
+		base := s.segmentStartPTS(ses, upstream)
+		rw := newPTSRewriter(base)
+		body := newTSRewriteReader(resp.Body, rw)
+		_, _ = io.Copy(w, &countWriter{w: body, s: ses})
+		return
 	}
 	_, _ = io.Copy(w, &countWriter{w: resp.Body, s: ses})
 }
@@ -650,9 +691,20 @@ func fetchAll(up, referer, ua string) ([]byte, error) {
 func (s *Server) rewritePlaylist(body []byte, upURL, sessionID string) string {
 	lines := strings.Split(string(body), "\n")
 	base, _ := url.Parse(upURL)
+	curDur := 6.0 // 默认分片时长（秒），EXTINF 缺失时兜底
 	for i, ln := range lines {
 		trimmed := strings.TrimSpace(ln)
 		if trimmed == "" {
+			continue
+		}
+		// #EXTINF:<dur>,<title> → 记住时长，供下一个分片用
+		if strings.HasPrefix(trimmed, "#EXTINF:") {
+			rest := strings.TrimPrefix(trimmed, "#EXTINF:")
+			if k := strings.IndexAny(rest, ","); k >= 0 {
+				if d, err := strconv.ParseFloat(rest[:k], 64); err == nil && d > 0 {
+					curDur = d
+				}
+			}
 			continue
 		}
 		// 带标签的行：只处理 URI 属性（EXT-X-MAP / EXT-X-KEY / EXT-X-MEDIA）
@@ -669,6 +721,8 @@ func (s *Server) rewritePlaylist(body []byte, upURL, sessionID string) string {
 		if isHLSURL(abs) {
 			lines[i] = s.baseURL + hlsPlPath(sessionID, abs)
 		} else {
+			// 记录分片（EXTINF 时长 + URL），供跨分片连续时间戳用
+			s.recordSegment(sessionID, abs, curDur)
 			lines[i] = s.baseURL + hlsSegPath(sessionID, abs)
 		}
 	}

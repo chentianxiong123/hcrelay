@@ -51,6 +51,56 @@ body{
 .playbar .pi{font-size:15px;flex-shrink:0}
 .playbar .pt{flex:1;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .playbar .pb{font-size:10px;color:var(--ok);flex-shrink:0}
+
+/* ── 播放控制面板 ── */
+#player{margin-top:10px;padding:11px 12px;background:var(--card2);border-radius:10px;border:1px solid var(--line)}
+.pnow{display:flex;align-items:center;gap:7px;margin-bottom:9px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.pnow-ic{font-size:11px;color:var(--ok);flex-shrink:0}
+.pnow-title{flex:1;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pnow-speed{font-size:10px;color:var(--dim);flex-shrink:0;font-variant-numeric:tabular-nums}
+.pctl{display:flex;align-items:center;gap:7px;margin-bottom:10px}
+.pbtn{
+  width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--card);
+  color:var(--fg);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .12s;flex-shrink:0;
+}
+.pbtn:active{transform:scale(.92)}
+.pbtn:hover{border-color:var(--dim)}
+.pbtn.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.ptime{flex:1;text-align:center;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.ptime #t-cur{color:var(--fg);font-weight:600}
+
+/* 进度条 */
+.seekwrap{position:relative;padding:7px 0;cursor:pointer;touch-action:none}
+.seektrack{height:5px;background:var(--line);border-radius:3px;position:relative;overflow:visible}
+.seekbuf{position:absolute;left:0;top:0;height:100%;background:rgba(255,255,255,.06);border-radius:3px;width:0}
+.seekfill{position:absolute;left:0;top:0;height:100%;background:var(--acc);border-radius:3px;width:0}
+.seekknob{
+  position:absolute;top:50%;left:0;width:13px;height:13px;border-radius:50%;background:#fff;
+  transform:translate(-50%,-50%);box-shadow:0 2px 6px rgba(0,0,0,.5);transition:transform .1s;
+}
+.seekwrap.dragging .seekknob{transform:translate(-50%,-50%) scale(1.35)}
+.seektip{
+  position:absolute;bottom:22px;transform:translateX(-50%);background:#000;color:#fff;
+  font-size:9px;padding:2px 6px;border-radius:4px;pointer-events:none;opacity:0;transition:opacity .12s;white-space:nowrap;
+}
+.seekwrap:hover .seektip,.seekwrap.dragging .seektip{opacity:1}
+
+/* 音量 */
+.volrow{display:flex;align-items:center;gap:8px;margin-top:8px}
+.vol-ic{font-size:12px;width:16px;text-align:center}
+.vol-num{font-size:10px;color:var(--dim);width:24px;text-align:right;font-variant-numeric:tabular-nums}
+input[type=range].vol{
+  flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
+  background:var(--line);outline:none;cursor:pointer;
+}
+input[type=range].vol::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:13px;height:13px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);cursor:pointer;
+}
+input[type=range].vol::-moz-range-thumb{
+  width:13px;height:13px;border-radius:50%;background:#fff;border:0;cursor:pointer;
+}
 .errbar{margin-top:7px;padding:7px 10px;font-size:10px;color:var(--acc);background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.18);border-radius:7px;word-break:break-all}
 
 /* ── 设备气泡 ── */
@@ -121,13 +171,36 @@ body{
     <div class="si"><div class="sl">目标电视</div><div class="sv warn" id="st-tv">未选择</div></div>
     <div class="si"><div class="sl">B站流地址</div><div class="sv link" id="st-url">—</div></div>
   </div>
-  <div id="playbar-wrap" class="hidden">
-    <div class="playbar">
-      <div class="pi">▶</div>
-      <div class="pt" id="pb-title">—</div>
-      <div class="pb" id="pb-bytes">0 B</div>
+  <div id="player" class="hidden">
+    <!-- 正在播放标题 -->
+    <div class="pnow"><span class="pnow-ic">▶</span><span class="pnow-title" id="p-title">—</span><span class="pnow-speed" id="p-speed"></span></div>
+    <!-- 播放控制条 -->
+    <div class="pctl">
+      <button class="pbtn" id="btn-play" onclick="ctl('play')" title="播放">▶</button>
+      <button class="pbtn" id="btn-pause" onclick="ctl('pause')" title="暂停">⏸</button>
+      <button class="pbtn" onclick="ctl('stop')" title="停止">⏹</button>
+      <div class="ptime"><span id="t-cur">00:00</span> / <span id="t-dur">00:00</span></div>
+      <button class="pbtn" onclick="ctl('reconnect')" title="重连">⟳</button>
+    </div>
+
+    <!-- 进度条（可拖动 seek） -->
+    <div class="seekwrap" id="seekwrap">
+      <div class="seektrack">
+        <div class="seekbuf" id="seekbuf"></div>
+        <div class="seekfill" id="seekfill"></div>
+        <div class="seekknob" id="seekknob"></div>
+      </div>
+      <div class="seektip" id="seektip">00:00</div>
+    </div>
+
+    <!-- 音量 -->
+    <div class="volrow">
+      <span class="vol-ic" id="vol-ic">🔊</span>
+      <input type="range" class="vol" id="vol" min="0" max="100" value="50" oninput="volPreview(this.value)" onchange="ctl('volume', this.value)">
+      <span class="vol-num" id="vol-num">50</span>
     </div>
   </div>
+
   <div id="errbar" class="errbar hidden">—</div>
 </div>
 
@@ -189,6 +262,152 @@ function fmtBytes(n) {
   return (n/1048576).toFixed(1)+' MB';
 }
 
+function fmtTime(sec) {
+  sec = Math.max(0, Math.floor(sec||0));
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = sec%60;
+  const p = n => String(n).padStart(2,'0');
+  return h > 0 ? h+':'+p(m)+':'+p(s) : p(m)+':'+p(s);
+}
+
+// ── 播放控制 ──
+function ctl(action, arg) {
+  let url = '/api/play?action='+action;
+  if(arg !== undefined) url += '&arg='+encodeURIComponent(arg);
+  fetch(url).then(r=>r.json()).then(d=>{
+    if(!d.ok) toast(d.msg||'操作失败', false);
+    else if(action==='volume') toast('音量 '+arg);
+    else if(action==='stop') toast('已停止');
+    else if(action==='reconnect') toast('已重新推送');
+    pollPlay();
+  }).catch(()=>toast('网络错误', false));
+}
+
+function volPreview(v) {
+  document.getElementById('vol-num').textContent = v;
+  document.getElementById('vol-ic').textContent = v==0?'🔇':(v<40?'🔉':'🔊');
+}
+
+// 拖动 seek
+let seeking = false, seekPct = 0;
+function seekPctFromEvent(e) {
+  const wrap = document.getElementById('seekwrap');
+  const r = wrap.getBoundingClientRect();
+  const x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+  return Math.max(0, Math.min(100, x / r.width * 100));
+}
+function initSeek() {
+  const wrap = document.getElementById('seekwrap');
+  const start = e => {
+    if(!curDuration) return;
+    e.preventDefault();
+    seeking = true;
+    seekPct = seekPctFromEvent(e);
+    wrap.classList.add('dragging');
+    paintSeek(seekPct);
+  };
+  const move = e => {
+    if(!seeking) return;
+    e.preventDefault();
+    seekPct = seekPctFromEvent(e);
+    paintSeek(seekPct);
+  };
+  const end = e => {
+    if(!seeking) return;
+    seeking = false;
+    wrap.classList.remove('dragging');
+    const sec = Math.round(curDuration * seekPct / 100);
+    ctl('seek', sec);
+  };
+  wrap.addEventListener('mousedown', start);
+  wrap.addEventListener('touchstart', start, {passive:false});
+  window.addEventListener('mousemove', move);
+  window.addEventListener('touchmove', move, {passive:false});
+  window.addEventListener('mouseup', end);
+  window.addEventListener('touchend', end);
+}
+
+let curDuration = 0;
+function paintSeek(pct) {
+  document.getElementById('seekfill').style.width = pct+'%';
+  document.getElementById('seekknob').style.left = pct+'%';
+  const tip = document.getElementById('seektip');
+  tip.textContent = fmtTime(curDuration * pct/100);
+  tip.style.left = pct+'%';
+}
+
+function pollPlay() {
+  fetch('/api/play/status').then(r=>r.json()).then(d=>{
+    const p = d.play || {};
+    const player = document.getElementById('player');
+
+    // 有会话才显示控制面板
+    if(p.elapsed !== undefined && (p.bytes > 0 || p.state)) {
+      player.classList.remove('hidden');
+    } else {
+      player.classList.add('hidden');
+      return;
+    }
+
+    // 标题 + 速度
+    document.getElementById('p-title').textContent = p.title || '播放中';
+    document.getElementById('p-speed').textContent = p.speed > 0 ? p.speed.toFixed(0)+' KB/s' : '';
+
+    // 电视状态 → 按钮高亮
+    const st = (p.state||'').toUpperCase();
+    const playing = st === 'PLAYING' || st === 'TRANSITIONING';
+    const paused = st === 'PAUSED_PLAYBACK' || st === 'PAUSED_RECORDING';
+    document.getElementById('btn-play').classList.toggle('on', playing);
+    document.getElementById('btn-pause').classList.toggle('on', paused);
+
+    // 时长：优先电视侧，退回本地估算
+    let dur = 0, cur = 0;
+    const tvDur = parseTVTime(p.duration);
+    const tvPos = parseTVTime(p.position);
+    if(tvDur > 0) { dur = tvDur; cur = tvPos; }
+    else { dur = p.total || 0; cur = p.elapsed || 0; }
+    curDuration = dur;
+
+    if(!seeking) {
+      const pct = dur > 0 ? Math.max(0, Math.min(100, cur/dur*100)) : (p.percent||0);
+      paintSeek(pct);
+    }
+    document.getElementById('t-cur').textContent = fmtTime(cur);
+    document.getElementById('t-dur').textContent = dur > 0 ? fmtTime(dur) : '--:--';
+
+    // 音量
+    if(p.volume !== undefined && p.volume !== '' && !volDragging) {
+      const v = parseInt(p.volume,10);
+      if(!isNaN(v)) {
+        document.getElementById('vol').value = v;
+        volPreview(v);
+      }
+    }
+  }).catch(()=>{});
+}
+
+// 解析电视的 0:00:12 / 00:01:23 / 123 格式
+function parseTVTime(s) {
+  if(!s) return 0;
+  s = String(s).trim();
+  if(s.indexOf(':') >= 0) {
+    const p = s.split(':').map(x=>parseInt(x,10)||0);
+    if(p.length===3) return p[0]*3600+p[1]*60+p[2];
+    if(p.length===2) return p[0]*60+p[1];
+    return p[0]||0;
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+let volDragging = false;
+document.addEventListener('DOMContentLoaded', () => {
+  initSeek();
+  const v = document.getElementById('vol');
+  v.addEventListener('pointerdown', ()=>volDragging=true);
+  window.addEventListener('pointerup', ()=>volDragging=false);
+});
+
 function refresh() {
   fetch('/api/status').then(r=>r.json()).then(d=>{
     const s = d.status;
@@ -204,13 +423,6 @@ function refresh() {
     else { tvEl.textContent = '未选择'; tvEl.className='sv warn'; }
 
     document.getElementById('st-url').textContent = s.cur_url || '—';
-
-    const pw = document.getElementById('playbar-wrap');
-    if(s.ses_title) {
-      pw.classList.remove('hidden');
-      document.getElementById('pb-title').textContent = s.ses_title;
-      document.getElementById('pb-bytes').textContent = fmtBytes(s.ses_bytes||0);
-    } else pw.classList.add('hidden');
 
     const ew = document.getElementById('errbar');
     if(s.last_err) { ew.textContent = s.last_err; ew.classList.remove('hidden'); }
@@ -274,11 +486,12 @@ async function pollLogs() {
     }
   } catch(e){}
 }
-setInterval(pollLogs, 2000);
+setInterval(pollLogs, 2500);
 
-// 轮询
-setInterval(refresh, 2000);
+// 统一的 1s 轮询：状态 + 播放进度
+setInterval(()=>{ refresh(); pollPlay(); }, 1000);
 refresh();
+pollPlay();
 pollLogs();
 </script>
 </body>

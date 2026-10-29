@@ -122,6 +122,23 @@ func New(opts Options) *Instance {
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("/api/play", func(w http.ResponseWriter, rq *http.Request) {
+		action := rq.URL.Query().Get("action")
+		arg := rq.URL.Query().Get("arg")
+		if action == "" {
+			writeJSON(w, map[string]any{"ok": false, "msg": "缺少 action"})
+			return
+		}
+		if err := rl.Control(action, arg); err != nil {
+			writeJSON(w, map[string]any{"ok": false, "msg": err.Error()})
+			return
+		}
+		rl.Logf("控制: %s %s", action, arg)
+		writeJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/api/play/status", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"ok": true, "play": rl.PlayStatus()})
+	})
 	mux.HandleFunc("/api/debug", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"sessions": ms.Debug()})
 	})

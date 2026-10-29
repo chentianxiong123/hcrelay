@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,11 @@ func New(r *renderer.Renderer, m *media.Server, b *bili.Client, baseURL string) 
 	// 订阅渲染端事件
 	r.SetEventFn(rl.onRendererEvent)
 	return rl
+}
+
+// Logf 记一条日志（供 server 层调用）
+func (rl *Relay) Logf(format string, args ...any) {
+	rl.logf(format, args...)
 }
 
 func (rl *Relay) logf(format string, args ...any) {
@@ -261,6 +267,117 @@ func (rl *Relay) stopRelay() {
 	rl.controlTV("stop", "", 0)
 }
 
+// Control 控制当前会话（给 UI 用）
+// action: play | pause | stop | seek | volume | reconnect
+// arg: seek 传秒数字符串（如 "120"），volume 传 0-100
+func (rl *Relay) Control(action, arg string) error {
+	rl.mu.Lock()
+	ctrl := rl.ctrl
+	hasTV := rl.tv != nil
+	rl.mu.Unlock()
+
+	if action == "stop" {
+		rl.stopRelay()
+		return nil
+	}
+	if action == "reconnect" {
+		// 重新推一次当前会话给电视
+		rl.mu.Lock()
+		ses := rl.ses
+		rl.mu.Unlock()
+		if ses == nil {
+			return fmt.Errorf("没有正在播放的会话")
+		}
+		rl.pushToTV(ses)
+		return nil
+	}
+	if !hasTV || ctrl == nil {
+		return fmt.Errorf("尚未选择电视")
+	}
+	switch action {
+	case "play":
+		return ctrl.Control("play", "", 0)
+	case "pause":
+		return ctrl.Control("pause", "", 0)
+	case "seek":
+		// arg 秒 → REL_TIME 格式 0:02:00
+		sec, err := strconv.Atoi(strings.TrimSpace(arg))
+		if err != nil {
+			return fmt.Errorf("非法 seek 位置: %q", arg)
+		}
+		return ctrl.Control("seek", fmt.Sprintf("0:00:%02d", sec), 0)
+	case "volume":
+		v, err := strconv.Atoi(strings.TrimSpace(arg))
+		if err != nil {
+			return fmt.Errorf("非法音量: %q", arg)
+		}
+		if v < 0 {
+			v = 0
+		}
+		if v > 100 {
+			v = 100
+		}
+		return ctrl.Control("volume", "", v)
+	}
+	return fmt.Errorf("未知操作: %s", action)
+}
+
+// PlayState 播放状态（给 UI）
+type PlayState struct {
+	State    string  `json:"state"`    // PLAYING / PAUSED_PLAYBACK / STOPPED / 空
+	Status   string  `json:"status"`   // 电视返回的原始状态
+	Title    string  `json:"title"`    // 当前播放标题
+	Duration string  `json:"duration"` // 电视侧总时长
+	Position string  `json:"position"` // 电视侧当前位置
+	URI      string  `json:"uri"`      // 电视正在播的地址
+	Volume   string  `json:"volume"`
+	Elapsed  float64 `json:"elapsed"`  // 本地估算已播秒
+	Total    float64 `json:"total"`    // 本地估算总秒
+	Percent  float64 `json:"percent"`  // 本地估算百分比
+	PosBytes int64   `json:"pos_bytes"`
+	TotalBytes int64 `json:"total_bytes"`
+	Bytes    int64   `json:"bytes"`
+	Speed    float64 `json:"speed"` // KB/s
+}
+
+// PlayStatus 查播放状态（优先电视侧，其次本地估算）
+func (rl *Relay) PlayStatus() PlayState {
+	var out PlayState
+	rl.mu.Lock()
+	ctrl := rl.ctrl
+	ses := rl.ses
+	rl.mu.Unlock()
+
+	// 本地进度
+	if ses != nil {
+		p := ses.SessionProgress()
+		out.Elapsed = p.Elapsed
+		out.Total = p.Duration
+		out.Percent = p.Percent
+		out.Bytes = p.Bytes
+		out.PosBytes = p.Pos
+		out.TotalBytes = p.Total
+		out.Speed = p.Speed
+	}
+	// 电视侧
+	if ctrl != nil {
+		st := ctrl.Status()
+		out.State = st["state"]
+		out.Status = st["status"]
+		out.Duration = st["duration"]
+		out.Position = st["position"]
+		out.URI = st["uri"]
+		out.Volume = st["volume"]
+	}
+	// 标题
+	rl.mu.Lock()
+	if rl.ses != nil {
+		out.Title = rl.ses.Src.Title
+	}
+	rl.mu.Unlock()
+	return out
+}
+
 // SelectTV 选择电视
 func (rl *Relay) SelectTV(dev *ssdp.Device) {
 	rl.mu.Lock()
@@ -287,8 +404,16 @@ func (rl *Relay) Status() map[string]any {
 	}
 	if ses != nil {
 		rl.mu.Unlock()
+		p := ses.SessionProgress()
 		out["ses_title"] = ses.Src.Title
-		out["ses_bytes"] = rl.media.SessionBytes(ses.ID)
+		out["ses_bytes"] = p.Bytes
+		out["ses_pos"] = p.Pos
+		out["ses_total"] = p.Total
+		out["ses_elapsed"] = p.Elapsed
+		out["ses_duration"] = p.Duration
+		out["ses_percent"] = p.Percent
+		out["ses_speed"] = p.Speed
+		out["ses_url"] = ses.URL
 		rl.mu.Lock()
 	}
 	return out

@@ -24,9 +24,6 @@ import (
 //go:embed web/templates/*.html
 var tplFS embed.FS
 
-//go:embed web/assets/htmx.min.js
-var htmxJS []byte
-
 // Port 默认端口
 const Port = "8080"
 
@@ -178,18 +175,6 @@ func New(opts Options) *Instance {
 			"Logs":    rl.GetLogs(),
 		}
 		_ = tpl.ExecuteTemplate(w, "index.html", data)
-	})
-	mux.HandleFunc("/hx/logs", func(w http.ResponseWriter, _ *http.Request) {
-		_ = tpl.ExecuteTemplate(w, "logs.html", map[string]any{"Logs": rl.GetLogs()})
-	})
-	mux.HandleFunc("/hx/status", func(w http.ResponseWriter, _ *http.Request) {
-		_ = tpl.ExecuteTemplate(w, "status.html", map[string]any{
-			"BaseURL": baseURL, "Status": rl.Status(), "TVs": tvList(),
-		})
-	})
-	mux.HandleFunc("/assets/htmx.min.js", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/javascript")
-		_, _ = w.Write(htmxJS)
 	})
 
 	inst.Handler = mux

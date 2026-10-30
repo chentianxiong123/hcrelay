@@ -20,6 +20,7 @@ import (
 	"hcrelay/internal/nva"
 	"hcrelay/internal/relay"
 	"hcrelay/internal/renderer"
+	"hcrelay/internal/sniff"
 	"hcrelay/internal/ssdp"
 )
 
@@ -34,6 +35,7 @@ type Instance struct {
 	Handler http.Handler
 	BaseURL string
 	Relay   *relay.Relay
+	Sniff   *sniff.Extractor
 	ad      *ssdp.Advertiser
 	nvaLn   net.Listener
 	nvaSrv  *nva.Server
@@ -110,6 +112,7 @@ func New(opts Options) *Instance {
 	inst := &Instance{
 		BaseURL: baseURL,
 		Relay:   rl,
+		Sniff:   sniff.New(sniff.Default()),
 		ad:      ad,
 		nvaLn:   nvaLn,
 		nvaSrv:  nvaSrv,
@@ -140,6 +143,26 @@ func New(opts Options) *Instance {
 	})
 	mux.HandleFunc("/api/debug", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"sessions": ms.Debug()})
+	})
+	// 盗版站/通用网页嗅探：输入详情页 URL → 集数列表
+	mux.HandleFunc("/api/sniff", func(w http.ResponseWriter, rq *http.Request) {
+		u := rq.URL.Query().Get("url")
+		if u == "" {
+			writeJSON(w, map[string]any{"ok": false, "msg": "缺少 url"})
+			return
+		}
+		// 防盗链：从请求头透传 Referer/UA（盗版站不能猜）
+		cfg := sniff.Default()
+		if ref := rq.Header.Get("Referer"); ref != "" {
+			cfg.Referer = ref
+		}
+		e := sniff.New(cfg)
+		eps, err := e.ExtractURL(u)
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "msg": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "url": u, "episodes": eps})
 	})
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{

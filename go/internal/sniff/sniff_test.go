@@ -144,3 +144,27 @@ func TestNeedsBrowser(t *testing.T) {
 		t.Errorf("normal page should NOT need browser")
 	}
 }
+
+// 站2（taijiquanpu.com 神马影院）真实结构：/smyyplay/ 路径 + playsx 容器 + btn-play 链接。
+func TestExtractShenma(t *testing.T) {
+	htmlText := `<div class="row gutter-20 sort plays-more" id="playsx">
+  <a href="/smyyplay/211339-1-1.html" class="btn-play">第1集</a>
+  <a href="/smyyplay/211339-1-2.html" class="btn-play">第2集</a>
+  <a href="/smyyplay/211339-1-3.html" class="btn-play">第3集</a>
+</div>
+<div class="recommend"><a href="/smyydetail/88.html">0.0全20集</a></div>`
+	e := New(Default())
+	eps := e.Extract(htmlText, "https://www.taijiquanpu.com/smyydetail/211339.html")
+	if len(eps) != 3 {
+		t.Fatalf("want 3, got %d: %+v", len(eps), eps)
+	}
+	if eps[0].URL != "https://www.taijiquanpu.com/smyyplay/211339-1-1.html" {
+		t.Errorf("ep0 URL=%q", eps[0].URL)
+	}
+	// 排除推荐位（"0.0全20集"，不在容器，非严格集数）
+	for _, ep := range eps {
+		if strings.Contains(ep.Title, "全") {
+			t.Errorf("误抓推荐位: %+v", ep)
+		}
+	}
+}

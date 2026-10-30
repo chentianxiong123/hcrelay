@@ -45,15 +45,17 @@ func Default() Config {
 		UA:      "Mozilla/5.0 (Linux; Android 13; SM-S9180) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
 		Referer: "",
 		Timeout: 15 * time.Second,
-		// 常见播放页路径（macCMS/苹果CMS/自建系各变体）
+		// 常见播放页路径（macCMS/苹果CMS/神马/自建系各变体）
 		PlayPath: []string{
 			"/play/", "/vodplay/", "/episode/", "/ep/",
 			"/cid/", "/vod/", "/video/", "/show/", "/view/", "/watch/",
 			"/dianying/", "/dsj/", "/zongyi/", "/lianzai/", "/tv/",
+			"/smyyplay/", "/smyy/", "/smyvod/", "/vodplay2/", "/play2/",
 		},
 		// 播放列表容器特征（id/class 关键词）
 		ContainerMarkers: []string{
 			"playlist", "play-list", "play_list", "con_playlist", "episodes", "episode-list", "episode_list", "droplist", "playtab", "playerlist", "list-ep", "ep-list",
+			"playsx", "plays-more", "playform", "play_list", "playpage", "player", "play-box", "playbox", "playlistbox",
 		},
 		TextHint: "集",
 	}

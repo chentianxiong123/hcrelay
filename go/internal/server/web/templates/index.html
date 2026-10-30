@@ -48,6 +48,23 @@ body{
 .epu{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:right;font-size:10px}
 .warn{color:#fbbf24}
 .dim{color:var(--dim)}
+
+/* ── 集数网格（参考 mymusic EpisodePicker：grid + 分页 + 复制/播放）── */
+.ep-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.ep-title{font-size:12px;font-weight:700}
+.ep-total{font-size:11px;color:var(--dim)}
+.ep-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;max-height:260px;overflow-y:auto}
+.ep-cell{height:34px;display:flex;align-items:center;justify-content:center;background:var(--card2);border:1px solid var(--line);border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;user-select:none;transition:all .12s}
+.ep-cell:active{transform:scale(.94)}
+.ep-cell.on{border-color:var(--acc);background:linear-gradient(180deg,rgba(255,77,109,.18),transparent);color:var(--acc)}
+.ep-pager{display:flex;gap:6px;justify-content:center;margin-top:8px;flex-wrap:wrap}
+.ep-pg{min-width:30px;height:26px;padding:0 6px;display:flex;align-items:center;justify-content:center;background:var(--card2);border:1px solid var(--line);border-radius:7px;font-size:11px;cursor:pointer}
+.ep-pg.on{border-color:var(--acc);color:var(--acc)}
+.ep-detail{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
+.ep-dt{font-size:12px;font-weight:600;margin-bottom:6px;word-break:break-all}
+.ep-actions{display:flex;gap:8px}
+.ep-actions .btn{flex:1;justify-content:center}
+.hidden{display:none}
 .sres{max-height:240px;overflow-y:auto}
 .sr{display:flex;flex-direction:column;gap:2px;padding:7px 6px;border-bottom:1px solid var(--line);cursor:pointer}
 .sr:hover{background:var(--card2)}
@@ -207,23 +224,43 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
       </div>
       <div id="errbar" class="errbar hidden">—</div>
     </div>
+  </div>
 
-    <div class="card">
-      <h2>资源搜索（bing/360/百度）</h2>
-      <div class="sniffrow">
-        <input class="inp" id="search-q" placeholder="搜盗版站，如：季节粤语 全集在线观看" >
-        <button class="btn gh" onclick="searchSites()">搜索</button>
-      </div>
-      <div id="search-res" class="sniffeps"><div class="dim">搜索盗版站关键词，点结果自动提取集数。</div></div>
-    </div>
-
+  <!-- ═══════════ 嗅探（独立页：搜索 + 集数 + 播放）═══════════ -->
+  <div class="page" id="page-sniff">
     <div class="card">
       <h2>资源嗅探（盗版站集数）</h2>
       <div class="sniffrow">
         <input class="inp" id="sniff-url" placeholder="粘贴盗版站详情页 URL" type="url">
-        <button class="btn gh" onclick="sniffURL()">提取集数</button>
+        <button class="btn gh" onclick="sniffURL()">嗅探</button>
       </div>
-      <div id="sniff-eps" class="sniffeps"><div class="dim">输入盗版站详情页链接，提取每一集的播放地址。遇到 JS 反爬自动用 WebView 打开。</div></div>
+      <div id="sniff-status" class="sniffeps"><div class="dim">输入盗版站详情页链接，提取每一集的播放地址。遇到 JS 反爬自动用 WebView 打开。</div></div>
+    </div>
+
+    <!-- 集数网格（参考 mymusic EpisodePicker：grid + 分页 + 复制/播放）-->
+    <div class="card hidden" id="ep-card">
+      <div class="ep-head">
+        <span class="ep-title" id="ep-title">集数</span>
+        <span class="ep-total" id="ep-total"></span>
+      </div>
+      <div class="ep-grid" id="ep-grid"></div>
+      <div class="ep-pager" id="ep-pager"></div>
+      <div class="ep-detail hidden" id="ep-detail">
+        <div class="ep-dt" id="ep-dt">—</div>
+        <div class="ep-actions">
+          <button class="btn gh" onclick="copyEp()">复制链接</button>
+          <button class="btn main" onclick="playEp()">▶ 播放</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>资源搜索（bing/360/百度）</h2>
+      <div class="sniffrow">
+        <input class="inp" id="search-q" placeholder="搜盗版站，如：季节粤语 全集在线观看">
+        <button class="btn gh" onclick="searchSites()">搜索</button>
+      </div>
+      <div id="search-res" class="sniffeps"><div class="dim">搜索盗版站关键词，点结果自动嗅探集数。</div></div>
     </div>
   </div>
 
@@ -289,6 +326,7 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
 <!-- ═══════════ 底部导航 ═══════════ -->
 <nav class="tabbar">
   <div class="tab active" data-page="home" onclick="goPage('home')"><span class="ti">🏠</span><span class="tt">首页</span></div>
+  <div class="tab" data-page="sniff" onclick="goPage('sniff')"><span class="ti">🔍</span><span class="tt">嗅探</span></div>
   <div class="tab" data-page="dock" onclick="goPage('dock')"><span class="ti tbadge" id="tab-dock-ic">🎮</span><span class="tt">操作台</span></div>
   <div class="tab" data-page="dev" onclick="goPage('dev')"><span class="ti">📺</span><span class="tt">设备</span></div>
   <div class="tab" data-page="log" onclick="goPage('log')"><span class="ti">📜</span><span class="tt">日志</span></div>
@@ -311,6 +349,82 @@ function toast(msg, ok=true) {
   el.innerHTML = '<span class="'+(ok?'ok':'err')+'">'+msg+'</span>';
   clearTimeout(el._t);
   el._t = setTimeout(()=>{ el.innerHTML=''; }, 3000);
+}
+
+// ── 资源嗅探（盗版站集数）+ WebView 兜底 ──
+let epsData = [];
+let epsPage = 1;
+const EPS_PER_PAGE = 30;
+let selEp = null;
+async function sniffURL() {
+  const u = document.getElementById('sniff-url').value.trim();
+  if(!u) { toast('请输入详情页 URL', false); return; }
+  const st = document.getElementById('sniff-status');
+  st.innerHTML = '<div class="dim">提取中…</div>';
+  document.getElementById('ep-card').classList.add('hidden');
+  try {
+    const r = await fetch('/api/sniff?url='+encodeURIComponent(u));
+    const d = await r.json();
+    if(d.ok) { renderEpsGrid(d.episodes||[], u); toast('提取到 '+(d.episodes||[]).length+' 集'); return; }
+    if(d.need_browser) {
+      st.innerHTML = '<div class="warn">检测到 JS 反爬，用 WebView 打开…</div>';
+      if(window.hc && window.hc.sniffRender) { window.hc.sniffRender(u); pollSniffResult(); }
+      else st.innerHTML = '<div class="warn">JS 反爬，需 App 内 WebView 兜底（桌面版不支持）。'+(d.msg||'')+'</div>';
+      return;
+    }
+    st.innerHTML = '<div class="warn">'+(d.msg||'提取失败')+'</div>';
+  } catch(e) { st.innerHTML = '<div class="warn">网络错误: '+e.message+'</div>'; }
+}
+function pollSniffResult() {
+  let tries = 0;
+  const iv = setInterval(async ()=>{
+    tries++;
+    try {
+      const r = await fetch('/api/sniff/result');
+      const d = await r.json();
+      if(d.ok && d.episodes && d.episodes.length) { clearInterval(iv); renderEpsGrid(d.episodes, d.url||''); toast('WebView 提取到 '+d.episodes.length+' 集'); }
+      else if(tries > 40) { clearInterval(iv); document.getElementById('sniff-status').innerHTML = '<div class="warn">WebView 提取超时</div>'; }
+    } catch(e) { clearInterval(iv); document.getElementById('sniff-status').innerHTML = '<div class="warn">轮询失败: '+e.message+'</div>'; }
+  }, 1000);
+}
+// 集数网格（参考 mymusic EpisodePicker：grid + 分页 + 复制/播放）
+function renderEpsGrid(eps, title) {
+  epsData = eps; epsPage = 1; selEp = null;
+  document.getElementById('ep-card').classList.remove('hidden');
+  document.getElementById('ep-title').textContent = title || '集数';
+  document.getElementById('ep-total').textContent = '共 '+eps.length+' 集';
+  document.getElementById('sniff-status').innerHTML = '';
+  drawEpGrid();
+}
+function drawEpGrid() {
+  const start = (epsPage-1)*EPS_PER_PAGE;
+  const page = epsData.slice(start, start+EPS_PER_PAGE);
+  document.getElementById('ep-grid').innerHTML = page.map(e=>
+    '<div class="ep-cell'+(selEp && selEp.url===e.url?' on':'')+'" onclick="selectEp('+start+')">'+e.index+'</div>'
+  ).join('');
+  const pages = Math.ceil(epsData.length/EPS_PER_PAGE);
+  let pg = '';
+  if(pages > 1) {
+    pg = '<div class="ep-pg'+(epsPage===1?' on':'')+'" onclick="gotoEp(1)">«</div>';
+    for(let i=Math.max(1,epsPage-2); i<=Math.min(pages,epsPage+2); i++) pg += '<div class="ep-pg'+(i===epsPage?' on':'')+'" onclick="gotoEp('+i+')">'+i+'</div>';
+    pg += '<div class="ep-pg'+(epsPage===pages?' on':'')+'" onclick="gotoEp('+pages+')">»</div>';
+  }
+  document.getElementById('ep-pager').innerHTML = pg;
+}
+function gotoEp(p) { epsPage = p; drawEpGrid(); }
+function selectEp(idx) {
+  const e = epsData[(epsPage-1)*EPS_PER_PAGE + idx];
+  if(!e) return;
+  selEp = e;
+  document.querySelectorAll('.ep-cell').forEach((c,i)=>c.classList.toggle('on', i===idx));
+  document.getElementById('ep-detail').classList.remove('hidden');
+  document.getElementById('ep-dt').textContent = '第'+e.index+'集 · '+e.title;
+}
+function copyEp() { if(selEp && navigator.clipboard) { navigator.clipboard.writeText(selEp.url); toast('已复制: '+selEp.url); } }
+function playEp() {
+  if(!selEp) return;
+  toast('播放：第'+selEp.index+'集（拿流→投屏待接）');
+  // TODO: 播放页 → 拿 m3u8 流 → 投屏（打通闭环后接 /api/play）
 }
 
 // ── 资源搜索（bing/360/百度 聚合）──
@@ -336,60 +450,9 @@ function renderSearchRes(box, rs) {
   ).join('')+'</div>';
 }
 function pickSite(u) {
-  // 点搜索结果 → 自动填详情页 URL 并提取集数
-  const inp = document.getElementById('sniff-url');
-  inp.value = u;
+  document.getElementById('sniff-url').value = u;
   sniffURL();
-  toast('提取集数: '+u);
-}
-
-// ── 资源嗅探（盗版站集数）+ WebView 兜底 ──
-async function sniffURL() {
-  const u = document.getElementById('sniff-url').value.trim();
-  if(!u) { toast('请输入详情页 URL', false); return; }
-  const box = document.getElementById('sniff-eps');
-  box.innerHTML = '<div class="dim">提取中…</div>';
-  try {
-    const r = await fetch('/api/sniff?url='+encodeURIComponent(u));
-    const d = await r.json();
-    if(d.ok) { renderEps(box, d.episodes||[]); toast('提取到 '+(d.episodes||[]).length+' 集'); return; }
-    if(d.need_browser) {
-      // JS 反爬：用 Android 壳 WebView 兜底（loadUrl 盗版站 → 拿 outerHTML → POST 回后端）
-      box.innerHTML = '<div class="warn">检测到 JS 反爬，用 WebView 打开…</div>';
-      if(window.hc && window.hc.sniffRender) {
-        window.hc.sniffRender(u);
-        pollSniffResult(box);
-      } else {
-        box.innerHTML = '<div class="warn">JS 反爬，需 App 内 WebView 兜底（桌面版不支持）。'+(d.msg||'')+'</div>';
-      }
-      return;
-    }
-    box.innerHTML = '<div class="warn">'+(d.msg||'提取失败')+'</div>';
-  } catch(e) {
-    box.innerHTML = '<div class="warn">网络错误: '+e.message+'</div>';
-  }
-}
-function pollSniffResult(box) {
-  let tries = 0;
-  const iv = setInterval(async ()=>{
-    tries++;
-    try {
-      const r = await fetch('/api/sniff/result');
-      const d = await r.json();
-      if(d.ok && d.episodes && d.episodes.length) {
-        clearInterval(iv); renderEps(box, d.episodes); toast('WebView 提取到 '+d.episodes.length+' 集');
-      } else if(tries > 40) { clearInterval(iv); box.innerHTML = '<div class="warn">WebView 提取超时</div>'; }
-    } catch(e) { clearInterval(iv); box.innerHTML = '<div class="warn">轮询失败: '+e.message+'</div>'; }
-  }, 1000);
-}
-function renderEps(box, eps) {
-  box.innerHTML = '<div class="eps">'+eps.map(e=>
-    '<div class="ep" onclick="copySniff(\''+e.url.replace(/'/g,"\\'")+'\')"><span class="epi">'+e.index+'</span><span class="ept">'+e.title+'</span><span class="epu">'+e.url+'</span></div>'
-  ).join('')+'</div>';
-}
-function copySniff(u) {
-  if(navigator.clipboard) navigator.clipboard.writeText(u);
-  toast('已复制: '+u);
+  toast('嗅探: '+u);
 }
 
 // ── 电视选择 ──

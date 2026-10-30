@@ -226,7 +226,8 @@ func refererCandidates(upstreamURL, appReferer string) []string {
 func (rl *Relay) onRendererEvent(e renderer.Event) {
 	switch e.Type {
 	case "uri":
-		rl.logf("收到 B站 投屏 URL: %s", truncate(e.URI, 80))
+		rl.logf("收到 B站 投屏 URL(完整): %s", e.URI)
+		rl.logf("  结构: %s", analyzeBiliURL(e.URI))
 		rl.mu.Lock()
 		rl.curURL = e.URI
 		rl.mu.Unlock()

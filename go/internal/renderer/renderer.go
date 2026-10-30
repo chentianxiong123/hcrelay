@@ -136,10 +136,10 @@ func (r *Renderer) handleDescription(w http.ResponseWriter, req *http.Request) {
   <device>
     <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
     <friendlyName>%s</friendlyName>
-    <manufacturer>HomeCast</manufacturer>
+    <manufacturer>MyCast</manufacturer>
     <manufacturerURL>https://homecast.local</manufacturerURL>
     <modelDescription>Bilibili DLNA relay renderer</modelDescription>
-    <modelName>HomeCast Relay</modelName>
+    <modelName>MyCast</modelName>
     <modelNumber>1.0</modelNumber>
     <modelURL>https://homecast.local</modelURL>
     <serialNumber>%s</serialNumber>

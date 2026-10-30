@@ -77,7 +77,7 @@ func New(opts Options) *Instance {
 	}
 	name := opts.Name
 	if name == "" {
-		name = "HomeCast Relay"
+		name = "MyCast"
 	}
 
 	baseURL := fmt.Sprintf("http://%s:%s", ip, port)

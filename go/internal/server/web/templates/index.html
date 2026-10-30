@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>HomeCast Relay</title>
+<title>MyCast</title>
 <link rel="icon" href="data:,">
 <style>
 :root{
@@ -183,7 +183,7 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
   <div class="hdr">
     <div class="logo">▶</div>
     <div class="hdr-t">
-      <h1>HomeCast Relay</h1>
+      <h1>MyCast</h1>
       <div class="sub" id="baseurl">{{.BaseURL}}</div>
     </div>
     <div class="hdr-dot" title="接收端在线"></div>
@@ -194,7 +194,7 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
     <div class="hero">
       <div class="hero-ic" id="hero-ic">📡</div>
       <div class="hero-t" id="hero-t">等待投屏</div>
-      <div class="hero-s" id="hero-s">打开 B站 App → 投屏 → 选「HomeCast Relay」</div>
+      <div class="hero-s" id="hero-s">打开 B站 App → 投屏 → 选「MyCast」</div>
       <span class="hero-badge idle" id="hero-badge">● 接收端在线</span>
     </div>
 
@@ -295,7 +295,7 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
 </nav>
 
 <script>
-const SELF_NAME = "HomeCast Relay";
+const SELF_NAME = "MyCast";
 
 // ── 页面切换 ──
 let curPage = 'home';
@@ -581,7 +581,7 @@ function refresh() {
     } else {
       heroI.textContent = '📡';
       heroT.textContent = '等待投屏';
-      heroS.textContent = '打开 B站 App → 投屏 → 选「HomeCast Relay」';
+      heroS.textContent = '打开 B站 App → 投屏 → 选「MyCast」';
       heroB.textContent = '● 接收端在线'; heroB.className = 'hero-badge idle';
     }
 
@@ -605,7 +605,7 @@ function renderBubbles(tvs, selected, playingTitle) {
   html += '<div class="bub" style="cursor:default">'+
     '<span class="bub-tag self">本机</span>'+
     '<div class="bub-ic self">'+(playingTitle?'📡':'📢')+'</div>'+
-    '<div class="bub-name">HomeCast Relay</div>'+
+    '<div class="bub-name">MyCast</div>'+
     '<div class="bub-ip">'+(playingTitle?'正在中继':'等待投屏')+'</div>'+
   '</div>';
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,22 +28,33 @@ type Episode struct {
 
 // Config 提取配置：页面类型正则/集数过滤特征（对齐 _is_detail_page/_is_play_page + 过滤规则）。
 type Config struct {
-	UA       string // 请求 User-Agent
-	Referer  string // 请求 Referer（防盗链）
-	Timeout  time.Duration
-	// 集数链接路径特征（命中任一即视为播放页链接，对齐 '/play/'、'/vodplay/'）
+	UA      string // 请求 User-Agent
+	Referer string // 请求 Referer（防盗链）
+	Timeout time.Duration
+	// 播放页路径关键词（命中任一视为播放页链接）。覆盖 macCMS/苹果CMS 各变体。
 	PlayPath []string
-	// 集数文本特征（命中才收，对齐 '集'）
+	// 播放列表容器 id/class 关键词（链接在该容器内且含集数文字 → 是集数，即使路径不认识）。
+	ContainerMarkers []string
+	// 集数文本特征（兜底：命中才收，对齐 '集'）
 	TextHint string
 }
 
-// Default 默认配置（覆盖苹果CMS/momovod 系常见盗版站）。
+// Default 默认配置（覆盖苹果CMS/momovod 系常见盗版站 + /cid/ 变体）。
 func Default() Config {
 	return Config{
-		UA:       "Mozilla/5.0 (Linux; Android 13; SM-S9180) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
-		Referer:  "",
-		Timeout:  15 * time.Second,
-		PlayPath: []string{"/play/", "/vodplay/", "/episode/", "/ep/"},
+		UA:      "Mozilla/5.0 (Linux; Android 13; SM-S9180) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
+		Referer: "",
+		Timeout: 15 * time.Second,
+		// 常见播放页路径（macCMS/苹果CMS/自建系各变体）
+		PlayPath: []string{
+			"/play/", "/vodplay/", "/episode/", "/ep/",
+			"/cid/", "/vod/", "/video/", "/show/", "/view/", "/watch/",
+			"/dianying/", "/dsj/", "/zongyi/", "/lianzai/", "/tv/",
+		},
+		// 播放列表容器特征（id/class 关键词）
+		ContainerMarkers: []string{
+			"playlist", "play-list", "play_list", "con_playlist", "episodes", "episode-list", "episode_list", "droplist", "playtab", "playerlist", "list-ep", "ep-list",
+		},
 		TextHint: "集",
 	}
 }
@@ -60,6 +72,9 @@ func New(cfg Config) *Extractor {
 	}
 	if len(cfg.PlayPath) == 0 {
 		cfg.PlayPath = []string{"/play/", "/vodplay/", "/episode/", "/ep/"}
+	}
+	if len(cfg.ContainerMarkers) == 0 {
+		cfg.ContainerMarkers = []string{"playlist", "play-list", "play_list", "con_playlist", "episodes"}
 	}
 	if cfg.TextHint == "" {
 		cfg.TextHint = "集"
@@ -128,8 +143,12 @@ type HTTPError struct{ Code int }
 
 func (h *HTTPError) Error() string { return "http " + strconv.Itoa(h.Code) }
 
-// Extract 从详情页 HTML 提取集数列表。
-// baseURL 用于把相对 href 拼成绝对 URL（取详情页 URL 的 scheme://host）。
+// Extract 从详情页 HTML 提取集数列表（通用规则 v2）。
+// 判定组合（满足任一即收）：
+//  1) 路径命中播放关键词 AND 文字含集数特征
+//  2) 链接在播放列表容器内 AND 文字含集数特征（不依赖具体路径，兼容 /cid/ 等）
+//  3) 链接在播放列表容器内 AND 路径含数字集数形态（macCMS /xxx/<id>-<n>-<ep>.html）
+// baseURL 用于把相对 href 拼成绝对 URL。
 func (e *Extractor) Extract(htmlText, baseURL string) []Episode {
 	doc, err := html.Parse(strings.NewReader(htmlText))
 	if err != nil {
@@ -145,7 +164,7 @@ func (e *Extractor) Extract(htmlText, baseURL string) []Episode {
 		if n.Type == html.ElementNode && n.Data == "a" {
 			href := getAttr(n, "href")
 			text := strings.TrimSpace(nodeText(n))
-			if isPlayLink(href, e.cfg.PlayPath) && strings.Contains(text, e.cfg.TextHint) {
+			if isEpisodeLink(n, href, text, e.cfg) {
 				full := resolveHref(base, href)
 				if full != "" && !seen[full] {
 					seen[full] = true
@@ -162,11 +181,104 @@ func (e *Extractor) Extract(htmlText, baseURL string) []Episode {
 	return eps
 }
 
+// NeedsBrowser 检测页面是否需要浏览器内核（JS 挑战/指纹反爬）。
+// 纯 HTTP 拿不到真实内容，需要 WebView 兜底。
+func NeedsBrowser(htmlText string) bool {
+	low := strings.ToLower(htmlText)
+	// 常见 JS 挑战/指纹守卫特征
+	if strings.Contains(low, "/_guard/") || strings.Contains(low, "_guard/auto") {
+		return true
+	}
+	if strings.Contains(low, "wappass.baidu.com") || strings.Contains(low, "verify") {
+		return true
+	}
+	// 页面短小且只含一个 script（挑战页典型形态）
+	if len(htmlText) < 500 && strings.Contains(low, "<script") && !strings.Contains(low, "<a ") {
+		return true
+	}
+	return false
+}
+
+// isEpisodeLink 判定一个 <a> 是否为集数链接（通用规则 v2）。
+// 主判据：在播放列表容器内（con_playlist/playlist 等）→ 集数文字/形态即可。
+// 次判据：不在容器内，仅当 严格"第N集" + 路径命中（排除"下一集"/推荐位误抓）。
+func isEpisodeLink(a *html.Node, href, text string, cfg Config) bool {
+	if href == "" || strings.HasPrefix(href, "javascript:") || strings.HasPrefix(href, "#") {
+		return false
+	}
+	if text == "" {
+		return false
+	}
+	epStrict := reEPStrict.MatchString(text)
+	epAny := reEPNum.MatchString(text)
+	pathHit := isPlayLink(href, cfg.PlayPath)
+	inContainer := inPlaylistContainer(a, cfg.ContainerMarkers)
+
+	// 主判据：播放列表容器内（这里就是集数列表）
+	if inContainer {
+		if epStrict || epAny || macCMSepShape(href) || strings.Contains(text, cfg.TextHint) {
+			return true
+		}
+	}
+	// 次判据：不在容器内，仅严格"第N集" + 路径命中（排除"下一集"/推荐位）
+	if !inContainer && epStrict && pathHit {
+		return true
+	}
+	return false
+}
+
+// isEpText 集数文字识别：第N集 / N集 / 第N期 / 全集 / 正片 / 含"集"字（兜底）。
+func isEpText(text, hint string) bool {
+	if text == "" {
+		return false
+	}
+	if reEPNum.MatchString(text) {
+		return true
+	}
+	// 含"集"字（兜底，对齐旧 TextHint）
+	if hint != "" && strings.Contains(text, hint) {
+		return true
+	}
+	return false
+}
+
+// macCMSepShape 是否形如 macCMS 集数路径：/xxx/<id>-<n>-<ep>.html 或 /xxx/12345-1-1.html。
+func macCMSepShape(href string) bool {
+	return reEpShape.MatchString(strings.ToLower(href))
+}
+
+// inPlaylistContainer 向上找祖先（ul/div/li），id/class 命中播放列表标记。
+func inPlaylistContainer(a *html.Node, markers []string) bool {
+	for p := a.Parent; p != nil; p = p.Parent {
+		if p.Type != html.ElementNode {
+			continue
+		}
+		id := strings.ToLower(getAttr(p, "id"))
+		cls := strings.ToLower(getAttr(p, "class"))
+		for _, m := range markers {
+			if strings.Contains(id, strings.ToLower(m)) || strings.Contains(cls, strings.ToLower(m)) {
+				return true
+			}
+		}
+		// 别爬太远（<body> 会误判）
+		if p.Data == "body" {
+			break
+		}
+	}
+	return false
+}
+
+// ErrNeedsBrowser 页面需要浏览器内核（JS 挑战/指纹反爬），纯 HTTP 拿不到。
+var ErrNeedsBrowser = errors.New("页面需要浏览器内核（JS 反爬挑战），请用 WebView 打开")
+
 // ExtractURL 一步到位：拉取详情页 → 提取集数。
 func (e *Extractor) ExtractURL(rawURL string) ([]Episode, error) {
 	htmlText, err := e.Fetch(rawURL)
 	if err != nil {
 		return nil, err
+	}
+	if NeedsBrowser(htmlText) {
+		return nil, ErrNeedsBrowser
 	}
 	eps := e.Extract(htmlText, rawURL)
 	if len(eps) == 0 {
@@ -211,7 +323,7 @@ func nodeText(n *html.Node) string {
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.TextNode {
-			sb.WriteString(n.Data)
+		sb.WriteString(n.Data)
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
@@ -220,3 +332,12 @@ func nodeText(n *html.Node) string {
 	walk(n)
 	return sb.String()
 }
+
+// 集数文字正则（宽）：第N集 / N集 / 第N期 / 全集 / 正片 / 番外 / 特辑。
+var reEPNum = regexp.MustCompile(`第\s*\d+\s*[集期话]|\d+\s*集|全集|正片|番外|特辑`)
+
+// 严格集数文字：第N集 / 第N期 / 第N话（排除"下一集"等导航词）。
+var reEPStrict = regexp.MustCompile(`第\s*\d+\s*[集期话]`)
+
+// macCMS 集数路径形态：/xxx/<id>-<n>-<ep>.html 或 /xxx/12345-1-1.html（数字-数字-数字 结尾）。
+var reEpShape = regexp.MustCompile(`/[^/]+/\d+-\d+-\d+(?:\.html?)?$`)

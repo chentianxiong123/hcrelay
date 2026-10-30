@@ -98,3 +98,49 @@ func TestResolveHrefRelative(t *testing.T) {
 		t.Errorf("URL=%q", eps[0].URL)
 	}
 }
+
+// 站1（deyunshucai.com）真实结构：/cid/ 路径 + con_playlist 容器 + 下一集/推荐位要排除。
+func TestExtractMacCMSWithCIDAndContainer(t *testing.T) {
+	htmlText := `<html><body>
+<div class="hd">某剧 2026</div>
+<div class="user-bt"><a id="next" href="/cid/87964-1-2.html">下一集</a></div>
+<div class="details-play-list">
+<ul id="con_playlist_1">
+  <li><a href="/cid/87964-1-1.html">第1集</a></li>
+  <li><a href="/cid/87964-1-2.html">第2集</a></li>
+  <li><a href="/cid/87964-1-3.html">第3集</a></li>
+</ul>
+</div>
+<div class="recommend"><a href="/cid/77623.html">0.0全19集</a></div>
+</body></html>`
+	e := New(Default())
+	eps := e.Extract(htmlText, "https://www.deyunshucai.com/cid/87964-1-1.html")
+	// 只收容器内 3 集，排除"下一集"和推荐位
+	if len(eps) != 3 {
+		t.Fatalf("want 3, got %d: %+v", len(eps), eps)
+	}
+	if eps[0].URL != "https://www.deyunshucai.com/cid/87964-1-1.html" {
+		t.Errorf("ep0 URL=%q", eps[0].URL)
+	}
+	for _, ep := range eps {
+		if ep.Title == "下一集" || strings.Contains(ep.Title, "全") {
+			t.Errorf("误抓导航/推荐位: %+v", ep)
+		}
+	}
+}
+
+// NeedsBrowser：站2（taijiquanpu.com）守卫页 / 验证码页 → true；正常页 → false。
+func TestNeedsBrowser(t *testing.T) {
+	guardPage := `<script src="/_guard/auto.js"></script>`
+	if !NeedsBrowser(guardPage) {
+		t.Errorf("guard page should need browser")
+	}
+	baiduVerify := `<html><script>location.href='https://wappass.baidu.com/verify'</script></html>`
+	if !NeedsBrowser(baiduVerify) {
+		t.Errorf("verify page should need browser")
+	}
+	normal := `<html><body><a href="/cid/1-1-1.html">第1集</a></body></html>`
+	if NeedsBrowser(normal) {
+		t.Errorf("normal page should NOT need browser")
+	}
+}

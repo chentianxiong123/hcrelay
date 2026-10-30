@@ -95,3 +95,67 @@ go test ./...                 → 仅 PTS 弯路 TestEndToEndCrossSegment 失败
 ## 下一步建议
 
 接入续期：`cid`（投屏 URL 提取）→ `GetVideoInfo` 反查 bvid → 到期前 `GetBestVideoURL` 拿新 `baseUrl` → 无缝切换。cookie 可配置（有则高清、无则降级保底）。
+
+---
+
+# 附：盗版网站嗅探资产（很早以前的记录，homecast 历史）
+
+> 用户提示：不是 B站 专用，是**盗版网站**的正则匹配 + 过滤页面 + 提取集数链接（123/45 这种）。
+> 来源：`backend/app/sniffer/extractor.py`（homecast git 历史，4月28日 `647bf17` 初始版起，10月2日 `28ac258` 砍 Playwright，后 `ee302ba` 收进 explore/）。
+
+## ① 页面类型正则识别（通用盗版站）
+
+```python
+def _is_detail_page(self, url):
+    detail_patterns = [
+        r"/vod/", r"/voddetail/", r"/detail/",
+        r"/video/\d+", r"/movie/", r"/tv/",
+    ]
+    return any(re.search(p, url, re.IGNORECASE) for p in detail_patterns)
+
+def _is_play_page(self, url):
+    play_patterns = [
+        r"/play/", r"/vodplay/", r"/episode/", r"/ep/",
+        r"play.*\.html",
+    ]
+    return any(re.search(p, url, re.IGNORECASE) for p in play_patterns)
+```
+
+覆盖盗版站常见路由：`/vod/`、`/vodplay/`（苹果CMS/momovod 系）、`/detail/`、`/episode/`、`/video/\d+` 等。
+
+## ② 集数列表提取（核心，123/45 这类）
+
+`_parse_episode_list`：加载详情页 → `li > a` 过滤 → 只取 `/play/` 或 `/vodplay/` 链接 + 含"集"字的 → 集数列表。
+
+```python
+# 关键过滤逻辑（li > a 结构）
+for item in li_links:
+    text, href = item['text'], item['href']
+    if not ('/play/' in href or '/vodplay/' in href):   # 只取播放链接
+        continue
+    if '集' not in text:                                 # 过滤"立即播放"等按钮
+        continue
+    full_url = base_url + href if href.startswith('/') else href
+    episodes.append(VideoEpisode(index=len(episodes)+1, title=text, url=full_url))
+# 去重 + 按 index 排序
+```
+
+## ③ 播放页流提取
+
+`_sniff_play_page`：监听网络请求拿 m3u8/video URL + 用正则从 `page.content()` 提取 m3u8（过滤 segment `.ts`、`hls`、`/1000k/` 等）。
+
+## ④ 兜底 yt-dlp
+
+`_try_ytdlp`：`yt-dlp --dump-json --playlist-items 1:100`，解析剧集/单集。
+
+## 坑与现状
+
+- **坑**：这套依赖 **Playwright 无头浏览器**（重、慢、需装浏览器），`28ac258` 已砍。`_parse_episode_list` 后来变成"已禁用"。
+- **要"直接吃"的建议**：把①（页面正则识别）+②（集数过滤规则）**纯逻辑提炼**（不依赖 Playwright），集数提取改用 **HTTP GET 详情页 + 正则/HTML 解析**（`li > a` 规则可映射成正则或简单 HTML 标签扫描），避免无头浏览器。③ 的 m3u8 正则可保留。④ yt-dlp 是外部依赖，可选。
+- **与 hcrelay 的衔接**：hcrelay 现在只接"App 投屏的现成 URL"，没做"输入盗版站页面 URL → 提取集数 → 选一集 → 拿流"。这份资产正好补这个入口。
+
+## 未实现（待探索）
+
+- [ ] 盗版站集数提取（纯 Go，无浏览器）：页面正则 + `li > a` 过滤 → 集数列表
+- [ ] 盗版站播放页 m3u8 提取（纯 Go 正则）
+- [ ] 前端"粘贴页面 URL → 嗅探 → 选集数 → 投屏"入口

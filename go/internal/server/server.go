@@ -324,16 +324,28 @@ func (inst *Instance) Stop() {
 // tvList 扫描电视（每 5 秒缓存）
 var lastScan time.Time
 var cached []*ssdp.Device
+var tvMu sync.Mutex
 
+// tvList 电视列表：读缓存（不阻塞 /ui）。首次无缓存则后台异步扫描，返回 nil（立即）。
+// 之前首次同步 ssdp.Search（等 5s 扫电视）导致 /ui 首次加载慢 5 秒+。
 func tvList() []*ssdp.Device {
-	if time.Since(lastScan) < 5*time.Second && cached != nil {
+	tvMu.Lock()
+	fresh := time.Since(lastScan) < 5*time.Second && cached != nil
+	tvMu.Unlock()
+	if fresh {
 		return cached
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cached = ssdp.Search(ctx, 5*time.Second)
-	lastScan = time.Now()
-	return cached
+	// 异步扫描（不阻塞调用方，扫描结果供下次缓存）
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		res := ssdp.Search(ctx, 5*time.Second)
+		tvMu.Lock()
+		cached = res
+		lastScan = time.Now()
+		tvMu.Unlock()
+	}()
+	return cached // 首次可能 nil，立即返回
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

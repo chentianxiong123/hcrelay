@@ -36,7 +36,8 @@ mycast/
 ├── go/                  # 业务核心（server.New() 全量 handler，可被壳复用）
 │   ├── cmd/mycast/     # 独立进程入口
 │   └── internal/        # ssdp / renderer / nva / upnp / bili / media / tv / relay / server
-├── wails3/              # 统一壳（安卓/桌面），见 wails3/build-android.md
+├── android/             # 自写原生 WebView 壳（零 Gradle，纯 aapt2 打包）
+├── archive/wails3/      # 已弃用的 wails3 壳（归档保留，不再维护）
 ├── docs/                # 技术分析与排查记录
 └── README.md
 ```
@@ -44,7 +45,7 @@ mycast/
 ## 运行
 
 ### 手机上（Android，推荐）
-用 wails3 打包成 APK 装到手机（见「wails3 打包」），或 Termux 直跑：
+用 `android/` 壳打包成 APK 装到手机（见「安卓打包」），或 Termux 直跑：
 
 ```bash
 # Termux
@@ -66,23 +67,25 @@ cd go && go build -o mycast ./cmd/mycast && ./mycast
 | `HCRELAY_IP` | 自动 | 对外 IP（电视能访问到的地址） |
 | `HCRELAY_ACCESS_KEY` | 空 | B站 access_key（会员高清可选） |
 
-## wails3 打包（安卓 APK）
+## 安卓打包（自写 WebView 壳）
 
-壳在 `wails3/`，产物 `wails3/bin/mycast.apk`（arm64-v8a + x86_64）。
+壳在 `android/`，产物 `android/dist/mycast-all.apk`（arm64-v8a + x86_64，零 Gradle）。
 
 ```bash
-cd wails3
-./build-android.sh            # arm64 真机（默认）
-./build-android.sh amd64      # 模拟器
+cd android
+./build-apk.sh            # 纯 aapt2 打包，双 ABI
 ```
+
+> wails3 壳已弃用（setURL no-op / 绑定限制 / 混合内容限制），归档在 `archive/wails3/`。
 
 安卓已适配：
 - `MainActivity.acquireMulticastLock()`：Android 默认丢多播包，SSDP 发现电视必须拿 `WifiManager.MulticastLock`
 - 权限：`INTERNET` + `CHANGE_WIFI_MULTICAST_STATE` + `ACCESS_WIFI_STATE`
 - `usesCleartextTraffic="true"`：WebView 走 127.0.0.1，电视走局域网 IP 拉 /m/ 流
 - 安卓端后端绑 `0.0.0.0`（电视要能拉到本机媒体流）
+- JS 桥 `window.hc.sniffRender(url)` + `window.hc.renderDone(html,url)`：JS 反爬站 WebView 兜底
 
-细节见 `wails3/build-android.md`。
+细节见 `android/` 源码。
 
 ## 打开控制台
 浏览器访问 `http://<手机IP>:8080/ui`（移动端四页 SPA）：

@@ -1,6 +1,4 @@
-// Package bili B站 playurl 客户端：拿 aid/cid/qn/access_key → 真实流地址。
-// 在 NVA（哔哩必连）模式下，B站 App 只下发 Play{aid,cid,qn}，
-// 我需要自己调 playurl 拿流，才能"自己持有一个不会过期的流"。
+// Package bili B站 客户端：playurl（App 投屏续期）+ DASH 嗅探（页面→真实流）。
 package bili
 
 import (
@@ -12,23 +10,48 @@ import (
 	"time"
 )
 
-// Client playurl 客户端
+// Client B站 客户端：同时支持 playurl 与 DASH 嗅探。
+// 融合自 homecast/internal/bilibili：buvid3 防风控、GetRaw 带 www.bilibili.com Referer 直转 DASH。
 type Client struct {
 	UA        string
 	Referer   string
 	Cookie    string
 	AccessKey string
+	BaseURL   string // B站 API 基址（GetJSON 用）
+	Timeout   time.Duration
+	buvid3    string // 随机 buvid3 cookie，防风控
 	hc        *http.Client
 }
 
-// New 默认客户端
+// New 默认客户端（playurl 模式；含 buvid3/BaseURL 初始化，兼容 GetJSON）
 func New(accessKey string) *Client {
 	return &Client{
 		UA:        "Mozilla/5.0 (Linux; Android 13; SM-S9180) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
 		Referer:   "https://www.bilibili.com/",
 		Cookie:    "",
 		AccessKey: accessKey,
+		BaseURL:   "https://api.bilibili.com",
+		Timeout:   15 * time.Second,
+		buvid3:    newUUID(),
 		hc:        &http.Client{Timeout: 15 * time.Second},
+	}
+}
+
+// NewClient 兼容 homecast 构造（指定 baseURL/ua/referer/timeout；AccessKey 空）
+func NewClient(baseURL, ua, referer string, timeout time.Duration) *Client {
+	return &Client{
+		UA:      ua,
+		Referer: referer,
+		BaseURL: baseURL,
+		Timeout: timeout,
+		buvid3:  newUUID(),
+		hc: &http.Client{
+			Timeout: timeout,
+			// DASH 流代理需要跟随重定向（B站 baseUrl 302 到 CDN）
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return nil
+			},
+		},
 	}
 }
 

@@ -279,7 +279,8 @@ func (e *Extractor) ExtractURL(rawURL string) ([]Episode, error) {
 	if err != nil {
 		return nil, err
 	}
-	if NeedsBrowser(htmlText) {
+	// 已知正版平台（B站/优酷/爱奇艺/腾讯/芒果/搜狐/抖音等）不是盗版站，不走 WebView 兜底
+	if !isLegitDomain(rawURL) && NeedsBrowser(htmlText) {
 		return nil, ErrNeedsBrowser
 	}
 	eps := e.Extract(htmlText, rawURL)
@@ -287,6 +288,25 @@ func (e *Extractor) ExtractURL(rawURL string) ([]Episode, error) {
 		return nil, errors.New("no episodes found")
 	}
 	return eps, nil
+}
+
+// isLegitDomain 已知正版平台域名：这些站的页面可能含 verify/wappass 字样，但走正常提取，不触发 WebView 兜底。
+func isLegitDomain(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, d := range []string{
+		"bilibili.com", "b23.tv", "youku.com", "iqiyi.com", "qiyi.com",
+		"qq.com", "v.qq.com", "mgtv.com", "sohu.com", "douyin.com",
+		"miguvideo.com", "1905.com", "cctv.com", "xigua.com",
+	} {
+		if strings.HasSuffix(host, d) || host == d {
+			return true
+		}
+	}
+	return false
 }
 
 func isPlayLink(href string, paths []string) bool {

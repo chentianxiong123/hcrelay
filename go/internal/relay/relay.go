@@ -398,6 +398,10 @@ func (rl *Relay) startRelay(upstreamURL, meta string, _ int, fromReferer, fromUA
 	rl.startedAt = time.Now()
 	rl.mu.Unlock()
 	rl.logf("媒体会话就绪: %s (%s)", ses.URL, ses.Type)
+	// B站 续期：从投屏 CDN URL 提取 aid/cid → 到期前 playurl 换新 deadline 流（治 30 分钟卡顿）
+	if aid, cid, dl, ok := extractBiliKey(upstreamURL); ok {
+		rl.startBiliRenew(ses, aid, cid, dl)
+	}
 
 	// 推给电视
 	rl.pushToTV(ses)
@@ -730,6 +734,78 @@ func guessHeaders(u string) (referer, ua string) {
 	return "", ua
 }
 
+// extractBiliKey 从 B站 CDN URL 提取 aid/cid/deadline（DASH upgcxcode/{avid}/{cid}）。
+// 返回 ok=false 表示不是可反查的 B站 DASH 流（m3u8/无特征），不续期。
+func extractBiliKey(u string) (aid, cid string, deadline int64, ok bool) {
+	if u == "" {
+		return "", "", 0, false
+	}
+	m := regexp.MustCompile(`/upgcxcode/(\d+)/(\d+)`).FindStringSubmatch(u)
+	if m == nil {
+		return "", "", 0, false
+	}
+	aid, cid = m[1], m[2]
+	if uu, err := url.Parse(u); err == nil {
+		if d := uu.Query().Get("deadline"); d != "" {
+			deadline, _ = strconv.ParseInt(d, 10, 64)
+		}
+	}
+	return aid, cid, deadline, true
+}
+
+// startBiliRenew 启动 B站 URL 续期 goroutine：到期前调 playurl 拿新 deadline 流，热换上游。
+// 电视连的是本机 /m/<id>，换 Src.URL 后电视下次拉流用新 URL，无感。
+func (rl *Relay) startBiliRenew(ses *media.Session, aid, cid string, deadline int64) {
+	if aid == "" || cid == "" {
+		return
+	}
+	dl := "未知"
+	if deadline > 0 {
+		dl = time.Unix(deadline, 0).Format("15:04:05")
+	}
+	rl.logf("启动 B站 续期: aid=%s cid=%s 到期=%s", aid, cid, dl)
+	go func() {
+		for {
+			var wait time.Duration
+			if deadline > 0 {
+				wait = time.Until(time.Unix(deadline, 0)) - 2*time.Minute // 提前 2 分钟
+				if wait < 15*time.Second {
+					wait = 15 * time.Second
+				}
+			} else {
+				wait = 25 * time.Minute
+			}
+			time.Sleep(wait)
+			// 会话已被新投屏/停止替换 → 退出续期
+			rl.mu.Lock()
+			cur := rl.ses
+			rl.mu.Unlock()
+			if cur != ses {
+				rl.logf("续期退出（会话已替换）")
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			_ = ctx
+			st, err := rl.bili.PlayURL(aid, cid, 80)
+			cancel()
+			if err != nil {
+				rl.logf("续期失败(2分钟后重试): %v", err)
+				deadline = time.Now().Add(2 * time.Minute).Unix()
+				continue
+			}
+			ses.SetUpstreamURL(st.URL)
+			if _, _, nd, ok := extractBiliKey(st.URL); ok && nd > 0 {
+				deadline = nd
+			}
+			rl.logf("续期成功 → %s", truncate(st.URL, 70))
+		}
+	}()
+}
+
+// analyzeBiliURL 分析 B站 CDN URL 结构，判断能否反查 aid/cid 续期。
+// DASH: .../upgcxcode/{avid}/{cid}/{cid}-1-30032.m4s?deadline=...  → 天然含 avid+cid
+// m3u8: .../hls/{cid}/...m3u8?deadline=...                          → 只含 cid
+// 返回人类可读描述，写入日志供用户投一次确认实际结构。
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -737,10 +813,6 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// analyzeBiliURL 分析 B站 CDN URL 结构，判断能否反查 aid/cid 续期。
-// DASH: .../upgcxcode/{avid}/{cid}/{cid}-1-30032.m4s?deadline=...  → 天然含 avid+cid
-// m3u8: .../hls/{cid}/...m3u8?deadline=...                          → 只含 cid
-// 返回人类可读描述，写入日志供用户投一次确认实际结构。
 func analyzeBiliURL(u string) string {
 	if u == "" {
 		return "空 URL"

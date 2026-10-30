@@ -73,6 +73,14 @@ type segInfo struct {
 	Dur float64 // EXTINF 时长（秒）
 }
 
+// SetUpstreamURL 热换上游 URL（B站 URL 到期续期用）。
+// 电视连的是本机 /m/<id>，换 Src.URL 后下次拉流用新 URL，电视无感。
+func (s *Session) SetUpstreamURL(u string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Src.URL = u
+}
+
 // Progress 播放进度
 type Progress struct {
 	Bytes    int64   `json:"bytes"`    // 累计传输字节（速度用）

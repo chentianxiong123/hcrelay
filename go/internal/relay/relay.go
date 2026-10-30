@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -259,7 +260,9 @@ func (rl *Relay) HandleNVACmd(name string, args map[string]any) (map[string]any,
 		rl.startRelayByCID(aid, cid)
 	case "PlayUrl":
 		u, _ := args["url"].(string)
-		rl.logf("  PlayUrl %s", truncate(u, 80))
+		// 记录完整 CDN URL + 是否含 aid/cid（用于确认 B站投屏结构，定续期反查方案）
+		rl.logf("  PlayUrl(完整): %s", u)
+		rl.logf("  PlayUrl 结构: %s", analyzeBiliURL(u))
 		rl.startRelay(u, "", 0, "", "")
 	case "Pause":
 		rl.controlTV("pause", "", 0)
@@ -731,6 +734,29 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// analyzeBiliURL 分析 B站 CDN URL 结构，判断能否反查 aid/cid 续期。
+// DASH: .../upgcxcode/{avid}/{cid}/{cid}-1-30032.m4s?deadline=...  → 天然含 avid+cid
+// m3u8: .../hls/{cid}/...m3u8?deadline=...                          → 只含 cid
+// 返回人类可读描述，写入日志供用户投一次确认实际结构。
+func analyzeBiliURL(u string) string {
+	if u == "" {
+		return "空 URL"
+	}
+	reAVID := regexp.MustCompile(`/upgcxcode/(\d+)/(\d+)`)
+	m := reAVID.FindStringSubmatch(u)
+	if m != nil {
+		return fmt.Sprintf("DASH ✓ 含 avid=%s cid=%s → 可直接 PlayURL(aid,cid) 续期", m[1], m[2])
+	}
+	reCID := regexp.MustCompile(`/hls/(\d+)`)
+	if m2 := reCID.FindStringSubmatch(u); m2 != nil {
+		return fmt.Sprintf("m3u8 只含 cid=%s → 需 cid→aid 反查或元数据", m2[1])
+	}
+	if strings.Contains(u, "bilivideo.com") || strings.Contains(u, "bilibili.com") {
+		return "B站 CDN 但无 avid/cid 特征 → 需解析目录/DIDL 元数据"
+	}
+	return "非 B站 CDN URL（透传）"
 }
 
 func fmtFloat(v float64) string {

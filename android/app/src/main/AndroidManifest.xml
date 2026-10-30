@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- hcrelay 安卓壳（极简 WebView，零 Gradle/AGP，纯 aapt2 链路）：
+     内嵌 Go 服务端（assets/<abi>/hcrelay，GOOS=android 交叉编译）
+     功能：B站/百度投屏中继 + 电视控制 + 盗版站集数嗅探（含 WebView 兜底） -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.hcrelay.app">
+
+    <!-- minSdk 26：服务端二进制 /system/bin/linker64 动态链接需 Android 8+
+         targetSdk 34：真机 Android 14+ -->
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
+
+    <!-- 服务端访问 B站/盗版站外网 + 投屏拉流 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- SSDP 组播发现（电视）需要接收多播包 -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <application
+        android:label="HomeCast Relay"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:usesCleartextTraffic="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

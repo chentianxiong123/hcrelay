@@ -7,12 +7,14 @@ import (
 	"crypto/rand"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"hcrelay/internal/bili"
@@ -40,6 +42,11 @@ type Instance struct {
 	nvaLn   net.Listener
 	nvaSrv  *nva.Server
 	stopFn  func()
+
+	// WebView 兜底回传结果（JS 拿 outerHTML → POST /api/sniff/render → 这里存）
+	sniffMu     sync.Mutex
+	sniffResult []sniff.Episode
+	sniffURL    string
 }
 
 // Options 装配选项
@@ -159,9 +166,45 @@ func New(opts Options) *Instance {
 		e := sniff.New(cfg)
 		eps, err := e.ExtractURL(u)
 		if err != nil {
-			writeJSON(w, map[string]any{"ok": false, "msg": err.Error()})
+			writeJSON(w, map[string]any{"ok": false, "msg": err.Error(), "need_browser": errors.Is(err, sniff.ErrNeedsBrowser)})
 			return
 		}
+		writeJSON(w, map[string]any{"ok": true, "url": u, "episodes": eps})
+	})
+
+	// WebView 兜底回传：JS 拿 outerHTML（挑战完成后）→ POST 这里 → 解析存结果
+	mux.HandleFunc("/api/sniff/render", func(w http.ResponseWriter, rq *http.Request) {
+		if rq.Method != http.MethodPost {
+			writeJSON(w, map[string]any{"ok": false, "msg": "需要 POST"})
+			return
+		}
+		rq.ParseForm()
+		htmlText := rq.PostFormValue("html")
+		u := rq.PostFormValue("url")
+		if htmlText == "" {
+			writeJSON(w, map[string]any{"ok": false, "msg": "缺少 html"})
+			return
+		}
+		eps := inst.Sniff.Extract(htmlText, u)
+		inst.sniffMu.Lock()
+		inst.sniffResult = eps
+		inst.sniffURL = u
+		inst.sniffMu.Unlock()
+		if len(eps) == 0 {
+			writeJSON(w, map[string]any{"ok": true, "episodes": 0, "msg": "no episodes found"})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "episodes": len(eps)})
+	})
+
+	// 前端轮询拿 WebView 兜底结果（读后清空）
+	mux.HandleFunc("/api/sniff/result", func(w http.ResponseWriter, _ *http.Request) {
+		inst.sniffMu.Lock()
+		eps := inst.sniffResult
+		u := inst.sniffURL
+		inst.sniffResult = nil
+		inst.sniffURL = ""
+		inst.sniffMu.Unlock()
 		writeJSON(w, map[string]any{"ok": true, "url": u, "episodes": eps})
 	})
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, _ *http.Request) {

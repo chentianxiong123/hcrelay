@@ -50,6 +50,35 @@ type Instance struct {
 	sniffMu     sync.Mutex
 	sniffResult []sniff.Episode
 	sniffURL    string
+
+	// 最近在看（历史记录，最多 5 条）
+	recentMu sync.Mutex
+	recent   []RecentItem
+}
+
+// RecentItem 一条最近播放记录（首页「最近在看」一键续看）
+type RecentItem struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	Time  string `json:"time"`
+}
+
+// recordRecent 记一条历史（同 URL 去重置顶，截断 5 条）
+func (inst *Instance) recordRecent(title, u string) {
+	if title == "" || u == "" {
+		return
+	}
+	inst.recentMu.Lock()
+	defer inst.recentMu.Unlock()
+	out := make([]RecentItem, 0, 5)
+	out = append(out, RecentItem{Title: title, URL: u, Time: time.Now().Format("01-02 15:04")})
+	for _, it := range inst.recent {
+		if len(out) >= 5 || it.URL == u {
+			continue
+		}
+		out = append(out, it)
+	}
+	inst.recent = out
 }
 
 // Options 装配选项
@@ -179,6 +208,7 @@ func New(opts Options) *Instance {
 	// 盗版站闭环：播放页 URL → 拿流(m3u8/mp4) → 投屏。妈妈操作 2 的最后一段。
 	mux.HandleFunc("/api/cast", func(w http.ResponseWriter, rq *http.Request) {
 		u := rq.URL.Query().Get("url")
+		title := rq.URL.Query().Get("title")
 		if u == "" {
 			writeJSON(w, map[string]any{"ok": false, "msg": "缺少 url"})
 			return
@@ -197,7 +227,19 @@ func New(opts Options) *Instance {
 			}
 		}
 		rl.CastStream(streamURL, ref)
+		// 记入「最近在看」（首页一键续看）
+		if title != "" {
+			inst.recordRecent(title, u)
+		}
 		writeJSON(w, map[string]any{"ok": true, "url": streamURL, "mime": mime, "ref": ref})
+	})
+
+	// 最近在看（历史记录，最多 5 条）
+	mux.HandleFunc("/api/recent", func(w http.ResponseWriter, _ *http.Request) {
+		inst.recentMu.Lock()
+		items := append([]RecentItem(nil), inst.recent...)
+		inst.recentMu.Unlock()
+		writeJSON(w, map[string]any{"ok": true, "items": items})
 	})
 
 	// WebView 兜底回传：JS 拿 outerHTML（挑战完成后）→ POST 这里 → 解析存结果

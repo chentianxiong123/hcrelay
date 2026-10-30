@@ -72,6 +72,26 @@ body{
 .sr-u{color:var(--dim);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sr-e{font-size:9px;color:var(--acc);font-weight:700;text-transform:uppercase}
 
+/* ── 首页：家庭影院 ── */
+.hero-q{font-size:20px;font-weight:800;margin-bottom:10px}
+.big-inp{height:46px;font-size:15px;border-radius:12px}
+.big-btn{height:46px;font-size:14px;padding:0 22px;border-radius:12px}
+.banner{margin-bottom:10px}
+.banner-in{display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,rgba(255,77,109,.14),transparent);border:1px solid rgba(255,77,109,.35);border-radius:13px;padding:10px 12px;cursor:pointer}
+.banner-ic{font-size:22px}
+.banner-t{flex:1;min-width:0}
+.banner-title{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.banner-sub{font-size:10px;color:var(--dim)}
+.banner-arrow{font-size:18px;color:var(--acc)}
+.recent{display:flex;flex-direction:column;gap:6px}
+.recent-it{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;cursor:pointer}
+.recent-it:active{transform:scale(.98)}
+.recent-t{flex:1;min-width:0}
+.recent-title{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent-sub{font-size:10px;color:var(--dim)}
+.recent-go{color:var(--acc);font-size:16px}
+.ep-loading{padding:14px 0;text-align:center;color:var(--dim);font-size:12px}
+
 /* page */
 .page{display:none}
 .page.active{display:block;animation:fade .2s}
@@ -210,38 +230,31 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
     <div class="hdr-dot" title="接收端在线"></div>
   </div>
 
-  <!-- ═══════════ 首页 ═══════════ -->
+  <!-- ═══════════ 首页（家庭影院：搜索 → 选站 → 集数 → 投屏，一条主链路）═══════════ -->
   <div class="page active" id="page-home">
-    <div class="hero">
-      <div class="hero-ic" id="hero-ic">📡</div>
-      <div class="hero-t" id="hero-t">等待投屏</div>
-      <div class="hero-s" id="hero-s">打开 B站 App → 投屏 → 选「MyCast」</div>
-      <span class="hero-badge idle" id="hero-badge">● 接收端在线</span>
-    </div>
-
-    <div class="card">
-      <h2>实时状态</h2>
-      <div class="sg">
-        <div class="si"><div class="sl">目标电视</div><div class="sv warn" id="st-tv">未选择</div></div>
-        <div class="si"><div class="sl">播放中</div><div class="sv dim" id="st-playing">—</div></div>
-        <div class="si"><div class="sl">速度</div><div class="sv dim" id="st-speed">—</div></div>
+    <!-- 投屏横幅（正在播放时显示，点击进遥控器）-->
+    <div class="banner hidden" id="cast-banner">
+      <div class="banner-in" onclick="goPage('dock')">
+        <span class="banner-ic">📺</span>
+        <div class="banner-t">
+          <div class="banner-title" id="cb-title">正在播放</div>
+          <div class="banner-sub">点这里打开遥控器</div>
+        </div>
+        <span class="banner-arrow">›</span>
       </div>
-      <div id="errbar" class="errbar hidden">—</div>
     </div>
-  </div>
 
-  <!-- ═══════════ 嗅探（独立页：搜索 + 集数 + 播放）═══════════ -->
-  <div class="page" id="page-sniff">
+    <!-- 搜索（妈妈的唯一入口）-->
     <div class="card">
-      <h2>资源嗅探（盗版站集数）</h2>
+      <div class="hero-q">想看什么？</div>
       <div class="sniffrow">
-        <input class="inp" id="sniff-url" placeholder="粘贴盗版站详情页 URL" type="url">
-        <button class="btn gh" onclick="sniffURL()">嗅探</button>
+        <input class="inp big-inp" id="search-q" placeholder="剧名 / 关键词，如：繁花 在线观看" onkeydown="if(event.key==='Enter')searchSites()">
+        <button class="btn pri big-btn" onclick="searchSites()">搜索</button>
       </div>
-      <div id="sniff-status" class="sniffeps"><div class="dim">输入盗版站详情页链接，提取每一集的播放地址。遇到 JS 反爬自动用 WebView 打开。</div></div>
+      <div id="search-res" class="sniffeps"><div class="dim">搜剧 → 选网站 → 点集数 → 电视开播</div></div>
     </div>
 
-    <!-- 集数网格（参考 mymusic EpisodePicker：grid + 分页 + 复制/播放）-->
+    <!-- 集数（主链路：点搜索结果后出现）-->
     <div class="card hidden" id="ep-card">
       <div class="ep-head">
         <span class="ep-title" id="ep-title">集数</span>
@@ -252,19 +265,26 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
       <div class="ep-detail hidden" id="ep-detail">
         <div class="ep-dt" id="ep-dt">—</div>
         <div class="ep-actions">
+          <button class="btn pri" onclick="playEp()">▶ 投屏播放</button>
           <button class="btn gh" onclick="copyEp()">复制链接</button>
-          <button class="btn pri" onclick="playEp()">▶ 播放</button>
         </div>
       </div>
     </div>
 
+    <!-- 最近在看（历史，一键续看）-->
     <div class="card">
-      <h2>资源搜索（bing/360/百度）</h2>
-      <div class="sniffrow">
-        <input class="inp" id="search-q" placeholder="搜盗版站，如：季节粤语 全集在线观看">
-        <button class="btn gh" onclick="searchSites()">搜索</button>
+      <h2>最近在看</h2>
+      <div class="recent" id="recent"><div class="dim">还没有播放记录，搜一个剧试试。</div></div>
+    </div>
+
+    <!-- 连接状态（小卡，收底部）-->
+    <div class="card">
+      <div class="sg">
+        <div class="si"><div class="sl">目标电视</div><div class="sv warn" id="st-tv">未选择</div></div>
+        <div class="si"><div class="sl">播放中</div><div class="sv dim" id="st-playing">—</div></div>
+        <div class="si"><div class="sl">速度</div><div class="sv dim" id="st-speed">—</div></div>
       </div>
-      <div id="search-res" class="sniffeps"><div class="dim">搜索盗版站关键词，点结果自动嗅探集数。</div></div>
+      <div id="errbar" class="errbar hidden">—</div>
     </div>
   </div>
 
@@ -318,11 +338,23 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
     </div>
   </div>
 
-  <!-- ═══════════ 日志 ═══════════ -->
-  <div class="page" id="page-log">
+  <!-- ═══════════ 设置（高级嗅探 + 日志 + 关于）═══════════ -->
+  <div class="page" id="page-set">
+    <div class="card">
+      <h2>高级：粘贴链接嗅探</h2>
+      <div class="sniffrow">
+        <input class="inp" id="sniff-url" placeholder="粘贴盗版站详情页 URL">
+        <button class="btn gh" onclick="sniffURL()">嗅探</button>
+      </div>
+      <div id="sniff-status" class="sniffeps"><div class="dim">给懂行的：粘贴详情页链接提取集数（JS 反爬自动用内置浏览器）。结果回到首页集数列表。</div></div>
+    </div>
     <div class="card">
       <h2>日志</h2>
       <div class="logs" id="logs"></div>
+    </div>
+    <div class="card">
+      <h2>关于</h2>
+      <div class="dim">MyCast — 手机投屏中继。<br>接 B站 / 盗版站投屏 → 转发电视。<br>B站 URL 到期自动续期，长时间播放不卡。</div>
     </div>
   </div>
 </div>
@@ -330,10 +362,9 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
 <!-- ═══════════ 底部导航 ═══════════ -->
 <nav class="tabbar">
   <div class="tab active" data-page="home" onclick="goPage('home')"><span class="ti">🏠</span><span class="tt">首页</span></div>
-  <div class="tab" data-page="sniff" onclick="goPage('sniff')"><span class="ti">🔍</span><span class="tt">嗅探</span></div>
-  <div class="tab" data-page="dock" onclick="goPage('dock')"><span class="ti tbadge" id="tab-dock-ic">🎮</span><span class="tt">操作台</span></div>
+  <div class="tab" data-page="dock" onclick="goPage('dock')"><span class="ti tbadge" id="tab-dock-ic">🎮</span><span class="tt">遥控器</span></div>
   <div class="tab" data-page="dev" onclick="goPage('dev')"><span class="ti">📺</span><span class="tt">设备</span></div>
-  <div class="tab" data-page="log" onclick="goPage('log')"><span class="ti">📜</span><span class="tt">日志</span></div>
+  <div class="tab" data-page="set" onclick="goPage('set')"><span class="ti">⚙️</span><span class="tt">设置</span></div>
 </nav>
 
 <script>
@@ -355,29 +386,44 @@ function toast(msg, ok=true) {
   el._t = setTimeout(()=>{ el.innerHTML=''; }, 3000);
 }
 
-// ── 资源嗅探（盗版站集数）+ WebView 兜底 ──
+// ── 资源嗅探（主链路：搜索点结果 or 设置页粘贴 URL，集数都在首页）──
 let epsData = [];
 let epsPage = 1;
 const EPS_PER_PAGE = 30;
 let selEp = null;
-async function sniffURL() {
+
+// 设置页：粘贴 URL → 嗅探（结果自动回首页集数列表）
+function sniffURL() {
   const u = document.getElementById('sniff-url').value.trim();
-  if(!u) { toast('请输入详情页 URL', false); return; }
-  const st = document.getElementById('sniff-status');
-  st.innerHTML = '<div class="dim">提取中…</div>';
-  document.getElementById('ep-card').classList.add('hidden');
+  if(!u) { toast('请输入链接', false); return; }
+  sniff(u, '');
+}
+
+// 主链路嗅探：对 URL 提取集数（首页集数卡）+ WebView 兜底
+async function sniff(u, title) {
+  if(!u) { toast('请输入链接', false); return; }
+  goPage('home');
+  epLoading('提取集数中…');
   try {
     const r = await fetch('/api/sniff?url='+encodeURIComponent(u));
     const d = await r.json();
-    if(d.ok) { renderEpsGrid(d.episodes||[], u); toast('提取到 '+(d.episodes||[]).length+' 集'); return; }
+    if(d.ok && d.episodes && d.episodes.length) { renderEpsGrid(d.episodes, title || d.url || ''); toast('找到 '+(d.episodes||[]).length+' 集'); return; }
     if(d.need_browser) {
-      st.innerHTML = '<div class="warn">检测到 JS 反爬，用 WebView 打开…</div>';
+      epLoading('检测到 JS 反爬，用内置浏览器打开…');
       if(window.hc && window.hc.sniffRender) { window.hc.sniffRender(u); pollSniffResult(); }
-      else st.innerHTML = '<div class="warn">JS 反爬，需 App 内 WebView 兜底（桌面版不支持）。'+(d.msg||'')+'</div>';
+      else epLoading('需 App 内打开（桌面版不支持 JS 反爬站）'+(d.msg||''));
       return;
     }
-    st.innerHTML = '<div class="warn">'+(d.msg||'提取失败')+'</div>';
-  } catch(e) { st.innerHTML = '<div class="warn">网络错误: '+e.message+'</div>'; }
+    epLoading(d.msg||'提取失败');
+  } catch(e) { epLoading('网络错误: '+e.message); }
+}
+function epLoading(msg) {
+  document.getElementById('ep-card').classList.remove('hidden');
+  document.getElementById('ep-title').textContent = '…';
+  document.getElementById('ep-total').textContent = '';
+  document.getElementById('ep-grid').innerHTML = '<div class="ep-loading">'+msg+'</div>';
+  document.getElementById('ep-pager').innerHTML = '';
+  document.getElementById('ep-detail').classList.add('hidden');
 }
 function pollSniffResult() {
   let tries = 0;
@@ -386,18 +432,17 @@ function pollSniffResult() {
     try {
       const r = await fetch('/api/sniff/result');
       const d = await r.json();
-      if(d.ok && d.episodes && d.episodes.length) { clearInterval(iv); renderEpsGrid(d.episodes, d.url||''); toast('WebView 提取到 '+d.episodes.length+' 集'); }
-      else if(tries > 40) { clearInterval(iv); document.getElementById('sniff-status').innerHTML = '<div class="warn">WebView 提取超时</div>'; }
-    } catch(e) { clearInterval(iv); document.getElementById('sniff-status').innerHTML = '<div class="warn">轮询失败: '+e.message+'</div>'; }
+      if(d.ok && d.episodes && d.episodes.length) { clearInterval(iv); renderEpsGrid(d.episodes, d.url||''); toast('找到 '+d.episodes.length+' 集'); }
+      else if(tries > 40) { clearInterval(iv); epLoading('提取超时'); }
+    } catch(e) { clearInterval(iv); epLoading('轮询失败: '+e.message); }
   }, 1000);
 }
-// 集数网格（参考 mymusic EpisodePicker：grid + 分页 + 复制/播放）
+// 集数网格（分页 + 选中 + 投屏）
 function renderEpsGrid(eps, title) {
   epsData = eps; epsPage = 1; selEp = null;
   document.getElementById('ep-card').classList.remove('hidden');
   document.getElementById('ep-title').textContent = title || '集数';
   document.getElementById('ep-total').textContent = '共 '+eps.length+' 集';
-  document.getElementById('sniff-status').innerHTML = '';
   drawEpGrid();
 }
 function drawEpGrid() {
@@ -427,13 +472,41 @@ function selectEp(idx) {
 function copyEp() { if(selEp && navigator.clipboard) { navigator.clipboard.writeText(selEp.url); toast('已复制: '+selEp.url); } }
 function playEp() {
   if(!selEp) return;
+  const t = document.getElementById('ep-title').textContent || '剧集';
+  const title = String(t).replace(/\d+集夹$/, '') + ' 第'+selEp.index+'集';
   toast('拿流中…');
-  fetch('/api/cast?url='+encodeURIComponent(selEp.url))
+  fetch('/api/cast?url='+encodeURIComponent(selEp.url)+'&title='+encodeURIComponent(title))
     .then(r=>r.json())
     .then(d=>{
-      if(d.ok) { toast('已投屏第'+selEp.index+'集'); goPage('dock'); }
+      if(d.ok) { toast('已投屏第'+selEp.index+'集'); goPage('dock'); loadRecent(); }
       else toast(d.msg||'拿流失败', false);
     })
+    .catch(e=>toast('错误: '+e.message, false));
+}
+
+// ── 最近在看（历史记录，一键续看）──
+async function loadRecent() {
+  try {
+    const r = await fetch('/api/recent');
+    const d = await r.json();
+    renderRecent(d.items||[]);
+  } catch(e){}
+}
+function renderRecent(items) {
+  const el = document.getElementById('recent');
+  if(!items.length) { el.innerHTML = '<div class="dim">还没有播放记录，搜一个剧试试。</div>'; return; }
+  el.innerHTML = items.map(it=>
+    '<div class="recent-it" onclick="replay(\''+it.url.replace(/'/g,"\\'")+'\',\''+it.title.replace(/'/g,"\\'")+'\')">'+
+    '<span style="font-size:18px">📺</span>'+
+    '<div class="recent-t"><div class="recent-title">'+it.title+'</div><div class="recent-sub">'+it.time+' · 点一下继续看</div></div>'+
+    '<span class="recent-go">›</span></div>'
+  ).join('');
+}
+function replay(u, title) {
+  toast('重新投屏：'+title);
+  fetch('/api/cast?url='+encodeURIComponent(u)+'&title='+encodeURIComponent(title))
+    .then(r=>r.json())
+    .then(d=>{ if(d.ok){ goPage('dock'); } else toast(d.msg||'失败', false); })
     .catch(e=>toast('错误: '+e.message, false));
 }
 
@@ -453,16 +526,14 @@ async function searchSites() {
 function renderSearchRes(box, rs) {
   if(!rs.length) { box.innerHTML = '<div class="warn">无结果</div>'; return; }
   box.innerHTML = '<div class="sres">'+rs.map(r=>
-    '<div class="sr" onclick="pickSite(\''+r.url.replace(/'/g,"\\'")+'\')">'+
+    '<div class="sr" onclick="pickSite(\''+r.url.replace(/'/g,"\\'")+'\',\''+(r.title||'').replace(/'/g,"\\'")+'\')">'+
     '<span class="sr-t">'+(r.title||r.url)+'</span>'+
     '<span class="sr-u">'+r.url+'</span>'+
     '<span class="sr-e">'+r.engine+'</span></div>'
   ).join('')+'</div>';
 }
-function pickSite(u) {
-  document.getElementById('sniff-url').value = u;
-  sniffURL();
-  toast('嗅探: '+u);
+function pickSite(u, title) {
+  sniff(u, title);
 }
 
 // ── 电视选择 ──
@@ -622,6 +693,11 @@ function pollPlay() {
     document.getElementById('st-playing').textContent = p.title || '—';
     document.getElementById('st-playing').className = 'sv ' + (playing?'ok':'dim');
     document.getElementById('st-speed').textContent = p.speed > 0 ? p.speed.toFixed(0)+' KB/s' : '—';
+
+    // 首页投屏横幅（正在播放 → 可点进遥控器）
+    const bn = document.getElementById('cast-banner');
+    if(playing) { bn.classList.remove('hidden'); document.getElementById('cb-title').textContent = p.title||'正在播放'; }
+    else bn.classList.add('hidden');
   }).catch(()=>{});
 }
 let volDragging = false;
@@ -729,7 +805,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // 统一轮询
 setInterval(()=>{ refresh(); pollPlay(); }, 1000);
 setInterval(pollLogs, 2500);
-refresh(); pollPlay(); pollLogs();
+refresh(); pollPlay(); pollLogs(); loadRecent();
 </script>
 </body>
 </html>

@@ -22,6 +22,7 @@ import (
 	"hcrelay/internal/nva"
 	"hcrelay/internal/relay"
 	"hcrelay/internal/renderer"
+	"hcrelay/internal/search"
 	"hcrelay/internal/sniff"
 	"hcrelay/internal/ssdp"
 )
@@ -38,6 +39,7 @@ type Instance struct {
 	BaseURL string
 	Relay   *relay.Relay
 	Sniff   *sniff.Extractor
+	Search  *search.Aggregator
 	ad      *ssdp.Advertiser
 	nvaLn   net.Listener
 	nvaSrv  *nva.Server
@@ -120,6 +122,7 @@ func New(opts Options) *Instance {
 		BaseURL: baseURL,
 		Relay:   rl,
 		Sniff:   sniff.New(sniff.Default()),
+		Search:  search.New(search.Default()),
 		ad:      ad,
 		nvaLn:   nvaLn,
 		nvaSrv:  nvaSrv,
@@ -206,6 +209,21 @@ func New(opts Options) *Instance {
 		inst.sniffURL = ""
 		inst.sniffMu.Unlock()
 		writeJSON(w, map[string]any{"ok": true, "url": u, "episodes": eps})
+	})
+
+	// 搜索盗版站（bing/360/百度 聚合，接 /api/sniff 提取集数）
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, rq *http.Request) {
+		q := strings.TrimSpace(rq.URL.Query().Get("q"))
+		if q == "" {
+			writeJSON(w, map[string]any{"ok": false, "msg": "缺少关键词"})
+			return
+		}
+		rs, err := inst.Search.Search(rq.Context(), q)
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "msg": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "query": q, "results": rs})
 	})
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{

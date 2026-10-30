@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# hcrelay 安卓壳构建（零 Gradle/AGP，纯 SDK 工具链）：
+# mycast 安卓壳构建（零 Gradle/AGP，纯 SDK 工具链）：
 #   GOOS=android 交叉编译服务端（默认 arm64-v8a，参数 x86_64 / both）→ assets/<abi> 内嵌
 #   → aapt2 link → javac → d8 → zipalign → apksigner
-# 产物：android/dist/hcrelay[-<abi>].apk
+# 产物：android/dist/mycast[-<abi>].apk
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -29,8 +29,8 @@ build_server() { # $1=abi $2=goarch
   [ "$abi" = "x86_64" ] && goos=linux
   echo "== 1/6 交叉编译 Go 服务端 ($abi / $goos/$goarch) =="
   mkdir -p "assets/$abi"
-  (cd ../go && GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "../android/assets/$abi/hcrelay" ./cmd/hcrelay)
-  ls -lh "assets/$abi/hcrelay" | awk '{print "  " $5 "/hcrelay"}'
+  (cd ../go && GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "../android/assets/$abi/mycast" ./cmd/mycast)
+  ls -lh "assets/$abi/mycast" | awk '{print "  " $5 "/mycast"}'
 }
 
 if [ "$GOARCH" = "both" ]; then
@@ -41,9 +41,9 @@ else
 fi
 
 if [ "$GOARCH" = "both" ]; then
-  APK="$OUT/hcrelay-all.apk"
+  APK="$OUT/mycast-all.apk"
 else
-  APK="$OUT/hcrelay-${ABI}.apk"
+  APK="$OUT/mycast-${ABI}.apk"
 fi
 
 echo "== 2/6 aapt2 link (manifest + assets → base.apk) =="
@@ -55,15 +55,15 @@ $BT/aapt2 link -o out/base.apk \
 
 echo "== 3/6 javac 编译壳 =="
 javac --release 8 -cp "$PLATFORM" -d out/classes \
-  app/src/main/java/com/hcrelay/app/MainActivity.java 2>/dev/null || {
+  app/src/main/java/com/mycast/app/MainActivity.java 2>/dev/null || {
   echo "(javac 警告已屏蔽，重跑显示)";
   javac --release 8 -cp "$PLATFORM" -d out/classes \
-    app/src/main/java/com/hcrelay/app/MainActivity.java;
+    app/src/main/java/com/mycast/app/MainActivity.java;
 }
 
 echo "== 4/6 d8 → classes.dex =="
 "$BT/d8" --lib "$PLATFORM" --release --min-api 26 --output out/ \
-  out/classes/com/hcrelay/app/*.class
+  out/classes/com/mycast/app/*.class
 echo "  dex: $(stat -c%s out/classes.dex) B"
 
 echo "== 5/6 dex 并入 apk + zipalign =="

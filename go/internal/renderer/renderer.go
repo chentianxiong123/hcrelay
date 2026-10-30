@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"hcrelay/internal/upnp"
+	"mycast/internal/upnp"
 )
 
 // UPnP 服务命名空间（SOAP 响应的 xmlns:u 必须与 SCPD 一致）
@@ -111,7 +111,7 @@ func (r *Renderer) handleEvent(w http.ResponseWriter, req *http.Request) {
 		sid := fmt.Sprintf("uuid:%x", time.Now().UnixNano())
 		w.Header().Set("SID", sid)
 		w.Header().Set("TIMEOUT", "Second-1800")
-		w.Header().Set("SERVER", "Linux/5.0 UPnP/1.0 hcrelay/0.1")
+		w.Header().Set("SERVER", "Linux/5.0 UPnP/1.0 mycast/0.1")
 		w.WriteHeader(http.StatusOK)
 	case "UNSUBSCRIBE":
 		w.WriteHeader(http.StatusOK)

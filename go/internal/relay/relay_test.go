@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"hcrelay/internal/media"
-	"hcrelay/internal/renderer"
-	"hcrelay/internal/ssdp"
+	"mycast/internal/media"
+	"mycast/internal/renderer"
+	"mycast/internal/ssdp"
 )
 
 func sleep() { time.Sleep(20 * time.Millisecond) }

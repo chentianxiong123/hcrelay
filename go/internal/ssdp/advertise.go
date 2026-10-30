@@ -158,7 +158,7 @@ func (a *Advertiser) replySearch(src *net.UDPAddr, st string) {
 			"DATE: %s\r\n"+
 			"EXT:\r\n"+
 			"LOCATION: %s\r\n"+
-			"SERVER: Linux/5.0 UPnP/1.0 hcrelay/0.1\r\n"+
+			"SERVER: Linux/5.0 UPnP/1.0 mycast/0.1\r\n"+
 			"ST: %s\r\n"+
 			"USN: %s\r\n"+
 			"BOOTID.UPNP.ORG: 1\r\n"+
@@ -198,7 +198,7 @@ func (a *Advertiser) sendAlive() {
 			"LOCATION: %s\r\n"+
 			"NT: %s\r\n"+
 			"NTS: ssdp:alive\r\n"+
-			"SERVER: Linux/5.0 UPnP/1.0 hcrelay/0.1\r\n"+
+			"SERVER: Linux/5.0 UPnP/1.0 mycast/0.1\r\n"+
 			"USN: %s\r\n\r\n", multicastAddr, maxAge, time.Now().UTC().Format(http.TimeFormat), a.Location, st, a.usnFor(st))
 		_, _ = conn.WriteToUDP([]byte(body), dst)
 	}

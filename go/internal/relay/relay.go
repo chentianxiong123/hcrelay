@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"hcrelay/internal/bili"
-	"hcrelay/internal/media"
-	"hcrelay/internal/renderer"
-	"hcrelay/internal/ssdp"
-	"hcrelay/internal/tv"
+	"mycast/internal/bili"
+	"mycast/internal/media"
+	"mycast/internal/renderer"
+	"mycast/internal/ssdp"
+	"mycast/internal/tv"
 )
 
 // Relay 编排器

@@ -290,7 +290,7 @@ func writeHandshake(nc net.Conn, session string, id uint64) error {
 		"UUID: XY0000000000000000000000000000000001\r\n" +
 		"Date: " + time.Now().UTC().Format(time.RFC1123) + "\r\n" +
 		"Content-Length: 0\r\n" +
-		"Server: Linux/5.0, UPnP/1.0, hcrelay/0.1\r\n\r\n"
+		"Server: Linux/5.0, UPnP/1.0, mycast/0.1\r\n\r\n"
 	_, err := nc.Write([]byte(body))
 	return err
 }

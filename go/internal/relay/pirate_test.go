@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"hcrelay/internal/media"
-	"hcrelay/internal/renderer"
+	"mycast/internal/media"
+	"mycast/internal/renderer"
 )
 
 // TestPirateSiteRefererPassthrough 验证盗版站防盗链场景：

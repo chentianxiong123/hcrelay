@@ -8,8 +8,8 @@ import (
 
 	"github.com/huin/goupnp/dcps/av1"
 
-	"hcrelay/internal/ssdp"
-	"hcrelay/internal/upnp"
+	"mycast/internal/ssdp"
+	"mycast/internal/upnp"
 )
 
 // Controller 电视控制句柄

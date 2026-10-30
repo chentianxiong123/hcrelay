@@ -1,5 +1,5 @@
-// Package server 组装 hcrelay 全部后端 handler（HTTP 服务）。
-// 被 cmd/hcrelay（独立进程）和 wails3 壳（安卓/桌面内嵌）复用。
+// Package server 组装 mycast 全部后端 handler（HTTP 服务）。
+// 被 cmd/mycast（独立进程）和 wails3 壳（安卓/桌面内嵌）复用。
 package server
 
 import (
@@ -17,14 +17,14 @@ import (
 	"sync"
 	"time"
 
-	"hcrelay/internal/bili"
-	"hcrelay/internal/media"
-	"hcrelay/internal/nva"
-	"hcrelay/internal/relay"
-	"hcrelay/internal/renderer"
-	"hcrelay/internal/search"
-	"hcrelay/internal/sniff"
-	"hcrelay/internal/ssdp"
+	"mycast/internal/bili"
+	"mycast/internal/media"
+	"mycast/internal/nva"
+	"mycast/internal/relay"
+	"mycast/internal/renderer"
+	"mycast/internal/search"
+	"mycast/internal/sniff"
+	"mycast/internal/ssdp"
 )
 
 //go:embed web/templates/*.html

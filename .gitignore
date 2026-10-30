@@ -1,7 +1,7 @@
 # 编译产物
-hcrelay
-hcrelay-android-arm64
-go/hcrelay
+mycast
+mycast-android-arm64
+go/mycast
 wails3/bin/
 wails3/frontend/dist/
 wails3/frontend/node_modules/
@@ -15,3 +15,5 @@ wails3/build/android/app/src/main/jniLibs/
 # wails3 生成的 overlay（每次 build 现生成）
 wails3/build/android/overlay.json
 wails3/build/android/main_android.gen.go
+android/out/
+android/dist/

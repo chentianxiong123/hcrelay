@@ -1,9 +1,9 @@
-# hcrelay — DLNA 投屏中继（手机当中间件）
+# mycast — DLNA 投屏中继（手机当中间件）
 
 把「App 投屏 → 电视」这条经常「越播越慢 / 播不了」的链路，改成手机当中间件：
 
 ```
-App(B站/百度/抖音/盗版站) ──SSDP发现/SOAP/NVA──> hcrelay(手机上) ──本地HTTP──> 电视(DLNA)
+App(B站/百度/抖音/盗版站) ──SSDP发现/SOAP/NVA──> mycast(手机上) ──本地HTTP──> 电视(DLNA)
                                                       │
                                                       ├─ 探测上游(Content-Type/防盗链)
                                                       ├─ HLS: 重写 m3u8 分片到本机代理
@@ -32,9 +32,9 @@ App(B站/百度/抖音/盗版站) ──SSDP发现/SOAP/NVA──> hcrelay(手�
 ## 目录结构
 
 ```
-hcrelay/
+mycast/
 ├── go/                  # 业务核心（server.New() 全量 handler，可被壳复用）
-│   ├── cmd/hcrelay/     # 独立进程入口
+│   ├── cmd/mycast/     # 独立进程入口
 │   └── internal/        # ssdp / renderer / nva / upnp / bili / media / tv / relay / server
 ├── wails3/              # 统一壳（安卓/桌面），见 wails3/build-android.md
 ├── docs/                # 技术分析与排查记录
@@ -49,13 +49,13 @@ hcrelay/
 ```bash
 # Termux
 pkg install golang
-cd /path/to/hcrelay/go
-go build -o hcrelay ./cmd/hcrelay && ./hcrelay
+cd /path/to/mycast/go
+go build -o mycast ./cmd/mycast && ./mycast
 ```
 
 ### 电脑/盒子上
 ```bash
-cd go && go build -o hcrelay ./cmd/hcrelay && ./hcrelay
+cd go && go build -o mycast ./cmd/mycast && ./mycast
 ```
 
 ### 环境变量
@@ -68,7 +68,7 @@ cd go && go build -o hcrelay ./cmd/hcrelay && ./hcrelay
 
 ## wails3 打包（安卓 APK）
 
-壳在 `wails3/`，产物 `wails3/bin/hcrelay.apk`（arm64-v8a + x86_64）。
+壳在 `wails3/`，产物 `wails3/bin/mycast.apk`（arm64-v8a + x86_64）。
 
 ```bash
 cd wails3
@@ -97,10 +97,10 @@ cd wails3
 > 普通用户不需要选择。
 
 ## 使用流程
-1. 手机装 hcrelay 并打开（SSDP 广播中）
+1. 手机装 mycast 并打开（SSDP 广播中）
 2. 打开 App，投屏 → 应该能搜到「HomeCast Relay」
-3. 在 hcrelay 界面「设备」页把电视设为目标
-4. App 开始投屏 → hcrelay 接住 → 探测/重写 → 推给电视
+3. 在 mycast 界面「设备」页把电视设为目标
+4. App 开始投屏 → mycast 接住 → 探测/重写 → 推给电视
 
 > 支持的入口：
 > - 标准 DLNA（百度、B站普通投屏、抖音等走 SOAP SetAVTransportURI）

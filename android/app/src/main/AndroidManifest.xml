@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- hcrelay 安卓壳（极简 WebView，零 Gradle/AGP，纯 aapt2 链路）：
-     内嵌 Go 服务端（assets/<abi>/hcrelay，GOOS=android 交叉编译）
+<!-- mycast 安卓壳（极简 WebView，零 Gradle/AGP，纯 aapt2 链路）：
+     内嵌 Go 服务端（assets/<abi>/mycast，GOOS=android 交叉编译）
      功能：B站/百度投屏中继 + 电视控制 + 盗版站集数嗅探（含 WebView 兜底） -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.hcrelay.app">
+    package="com.mycast.app">
 
     <!-- minSdk 26：服务端二进制 /system/bin/linker64 动态链接需 Android 8+
          targetSdk 34：真机 Android 14+ -->

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"hcrelay/internal/media"
-	"hcrelay/internal/renderer"
-	"hcrelay/internal/ssdp"
+	"mycast/internal/media"
+	"mycast/internal/renderer"
+	"mycast/internal/ssdp"
 )
 
 // TestLateStopDoesNotKillNewSession 验证：B站 切换视频时迟到的 Stop

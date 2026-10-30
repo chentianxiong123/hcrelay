@@ -1,4 +1,4 @@
-module hcrelay
+module mycast
 
 go 1.26.0
 

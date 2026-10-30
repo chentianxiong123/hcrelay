@@ -48,6 +48,12 @@ body{
 .epu{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:right;font-size:10px}
 .warn{color:#fbbf24}
 .dim{color:var(--dim)}
+.sres{max-height:240px;overflow-y:auto}
+.sr{display:flex;flex-direction:column;gap:2px;padding:7px 6px;border-bottom:1px solid var(--line);cursor:pointer}
+.sr:hover{background:var(--card2)}
+.sr-t{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-u{color:var(--dim);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-e{font-size:9px;color:var(--acc);font-weight:700;text-transform:uppercase}
 
 /* page */
 .page{display:none}
@@ -203,6 +209,15 @@ input[type=range].vrange::-moz-range-thumb{width:16px;height:16px;border-radius:
     </div>
 
     <div class="card">
+      <h2>资源搜索（bing/360/百度）</h2>
+      <div class="sniffrow">
+        <input class="inp" id="search-q" placeholder="搜盗版站，如：季节粤语 全集在线观看" >
+        <button class="btn gh" onclick="searchSites()">搜索</button>
+      </div>
+      <div id="search-res" class="sniffeps"><div class="dim">搜索盗版站关键词，点结果自动提取集数。</div></div>
+    </div>
+
+    <div class="card">
       <h2>资源嗅探（盗版站集数）</h2>
       <div class="sniffrow">
         <input class="inp" id="sniff-url" placeholder="粘贴盗版站详情页 URL" type="url">
@@ -296,6 +311,36 @@ function toast(msg, ok=true) {
   el.innerHTML = '<span class="'+(ok?'ok':'err')+'">'+msg+'</span>';
   clearTimeout(el._t);
   el._t = setTimeout(()=>{ el.innerHTML=''; }, 3000);
+}
+
+// ── 资源搜索（bing/360/百度 聚合）──
+async function searchSites() {
+  const q = document.getElementById('search-q').value.trim();
+  if(!q) { toast('请输入关键词', false); return; }
+  const box = document.getElementById('search-res');
+  box.innerHTML = '<div class="dim">搜索中…（bing → 360 → 百度）</div>';
+  try {
+    const r = await fetch('/api/search?q='+encodeURIComponent(q));
+    const d = await r.json();
+    if(d.ok) { renderSearchRes(box, d.results||[]); toast('搜到 '+(d.results||[]).length+' 条'); }
+    else box.innerHTML = '<div class="warn">'+(d.msg||'搜索失败')+'</div>';
+  } catch(e) { box.innerHTML = '<div class="warn">网络错误: '+e.message+'</div>'; }
+}
+function renderSearchRes(box, rs) {
+  if(!rs.length) { box.innerHTML = '<div class="warn">无结果</div>'; return; }
+  box.innerHTML = '<div class="sres">'+rs.map(r=>
+    '<div class="sr" onclick="pickSite(\''+r.url.replace(/'/g,"\\'")+'\')">'+
+    '<span class="sr-t">'+(r.title||r.url)+'</span>'+
+    '<span class="sr-u">'+r.url+'</span>'+
+    '<span class="sr-e">'+r.engine+'</span></div>'
+  ).join('')+'</div>';
+}
+function pickSite(u) {
+  // 点搜索结果 → 自动填详情页 URL 并提取集数
+  const inp = document.getElementById('sniff-url');
+  inp.value = u;
+  sniffURL();
+  toast('提取集数: '+u);
 }
 
 // ── 资源嗅探（盗版站集数）+ WebView 兜底 ──

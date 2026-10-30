@@ -256,6 +256,9 @@ func New(opts Options) *Instance {
 
 	tpl := template.Must(template.ParseFS(tplFS, "web/templates/*.html"))
 	mux.HandleFunc("/ui", func(w http.ResponseWriter, _ *http.Request) {
+		// 防缓存：/ui 是 SPA 入口，改了模板浏览器必须看到最新（之前用户打开旧缓存 UI）
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
 		data := map[string]any{
 			"BaseURL": baseURL,
 			"Status":  rl.Status(),

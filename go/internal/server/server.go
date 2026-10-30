@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -173,6 +174,30 @@ func New(opts Options) *Instance {
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true, "url": u, "episodes": eps})
+	})
+
+	// 盗版站闭环：播放页 URL → 拿流(m3u8/mp4) → 投屏。妈妈操作 2 的最后一段。
+	mux.HandleFunc("/api/cast", func(w http.ResponseWriter, rq *http.Request) {
+		u := rq.URL.Query().Get("url")
+		if u == "" {
+			writeJSON(w, map[string]any{"ok": false, "msg": "缺少 url"})
+			return
+		}
+		e := sniff.New(sniff.Default())
+		streamURL, mime, err := e.ResolveStream(u)
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "msg": err.Error()})
+			return
+		}
+		// 防盗链 referer = 播放页域名（透传，不能猜）
+		ref := rq.URL.Query().Get("ref")
+		if ref == "" {
+			if uu, err2 := url.Parse(u); err2 == nil {
+				ref = uu.Scheme + "://" + uu.Host + "/"
+			}
+		}
+		rl.CastStream(streamURL, ref)
+		writeJSON(w, map[string]any{"ok": true, "url": streamURL, "mime": mime, "ref": ref})
 	})
 
 	// WebView 兜底回传：JS 拿 outerHTML（挑战完成后）→ POST 这里 → 解析存结果

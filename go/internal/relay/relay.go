@@ -557,6 +557,17 @@ func (rl *Relay) Control(action, arg string) error {
 	return fmt.Errorf("未知操作: %s", action)
 }
 
+// CastStream 投一个流给电视（盗版站拿流后投屏）。
+// referer 通常是播放页域名（防盗链），startRelay 里 fromReferer 优先透传。
+func (rl *Relay) CastStream(streamURL, referer string) {
+	if streamURL == "" {
+		rl.setErr("空流 URL")
+		return
+	}
+	rl.logf("投流(盗版站): %s", truncate(streamURL, 70))
+	go rl.startRelay(streamURL, "", 0, referer, "")
+}
+
 // PlayState 播放状态（给 UI）
 type PlayState struct {
 	State    string  `json:"state"`    // PLAYING / PAUSED_PLAYBACK / STOPPED / 空

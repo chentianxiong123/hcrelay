@@ -427,8 +427,14 @@ function selectEp(idx) {
 function copyEp() { if(selEp && navigator.clipboard) { navigator.clipboard.writeText(selEp.url); toast('已复制: '+selEp.url); } }
 function playEp() {
   if(!selEp) return;
-  toast('播放：第'+selEp.index+'集（拿流→投屏待接）');
-  // TODO: 播放页 → 拿 m3u8 流 → 投屏（打通闭环后接 /api/play）
+  toast('拿流中…');
+  fetch('/api/cast?url='+encodeURIComponent(selEp.url))
+    .then(r=>r.json())
+    .then(d=>{
+      if(d.ok) { toast('已投屏第'+selEp.index+'集'); goPage('dock'); }
+      else toast(d.msg||'拿流失败', false);
+    })
+    .catch(e=>toast('错误: '+e.message, false));
 }
 
 // ── 资源搜索（bing/360/百度 聚合）──

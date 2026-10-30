@@ -6,6 +6,7 @@
 package sniff
 
 import (
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
@@ -144,6 +145,99 @@ func (e *Extractor) Fetch(rawURL string) (string, error) {
 type HTTPError struct{ Code int }
 
 func (h *HTTPError) Error() string { return "http " + strconv.Itoa(h.Code) }
+
+// ResolveStream 从播放页 URL 提取实际视频流（m3u8/mp4）。
+// macCMS/神马 播放页通常内嵌 player 配置的 url 字段或 video/iframe src。
+// 返回流 URL 与 MIME 类型（纯 Go，零浏览器）。
+func (e *Extractor) ResolveStream(playURL string) (streamURL, mime string, err error) {
+	htmlText, err := e.Fetch(playURL)
+	if err != nil {
+		return "", "", err
+	}
+	base, _ := url.Parse(playURL)
+
+	// 1. 绝对 m3u8（最可靠：player 配置内嵌的完整地址）
+	if m := regexp.MustCompile(`https?://[^"'<>\\\s]+?\.m3u8[^"'<>\\\s]*`).FindString(htmlText); m != "" {
+		return strings.TrimRight(m, ",'\")"), "application/vnd.apple.mpegurl", nil
+	}
+	// 2. 绝对 mp4
+	if m := regexp.MustCompile(`https?://[^"'<>\\\s]+?\.mp4[^"'<>\\\s]*`).FindString(htmlText); m != "" {
+		return strings.TrimRight(m, ",'\")"), "video/mp4", nil
+	}
+	// 3. player 配置相对 url（"url":"/xxx.m3u8" 或 url:'...'）
+	if m := regexp.MustCompile(`["']url["']\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']`).FindStringSubmatch(htmlText); m != nil {
+		return resolveRel(base, m[1]), "application/vnd.apple.mpegurl", nil
+	}
+	// 3b. 混淆流地址（macCMS base64/urldecode 变体：url:"JTY4JTc0..."）→ 解码后找 m3u8/mp4
+	reConf := regexp.MustCompile(`["']url["']\s*[:=]\s*["']([^"']+)["']`)
+	for _, m := range reConf.FindAllStringSubmatch(htmlText, -1) {
+		if d := decodeStreamCandidate(m[1]); isStream(d) {
+			return resolveRel(base, d), guessMime(d), nil
+		}
+	}
+	// 4. <video src> / <source src>
+	if m := regexp.MustCompile(`<video[^>]+src=["']([^"']+)["']`).FindStringSubmatch(htmlText); m != nil && isStream(m[1]) {
+		return resolveRel(base, m[1]), guessMime(m[1]), nil
+	}
+	// 5. iframe（播放器在子页）→ 请求子页再找
+	if m := regexp.MustCompile(`<iframe[^>]+src=["']([^"']+)["']`).FindStringSubmatch(htmlText); m != nil {
+		sub := resolveRel(base, m[1])
+		if subHTML, e2 := e.Fetch(sub); e2 == nil {
+			if sm := regexp.MustCompile(`https?://[^"'<>\\\s]+?\.(m3u8|mp4)[^"'<>\\\s]*`).FindString(subHTML); sm != "" {
+				return strings.TrimRight(sm, ",'\")"), guessMime(sm), nil
+			}
+		}
+	}
+	return "", "", errors.New("播放页未找到流地址（m3u8/mp4）")
+}
+
+func resolveRel(base *url.URL, ref string) string {
+	u, err := url.Parse(ref)
+	if err != nil {
+		return ref
+	}
+	return base.ResolveReference(u).String()
+}
+
+// decodeStreamCandidate 解码 macCMS 混淆的流地址（base64 / urldecode 循环变体）。
+// 例："JTY4JTc0..." → base64 → "%68%74%74..." → urldecode → "https://.../index.m3u8"
+// 返回首个解码后能识别为流的候选（isStream），否则原样返回。
+func decodeStreamCandidate(s string) string {
+	if s == "" || isStream(s) {
+		return s
+	}
+	cands := []string{s}
+	cur := s
+	for i := 0; i < 5; i++ {
+		if b, err := base64.StdEncoding.DecodeString(cur); err == nil && len(b) > 4 {
+			cands = append(cands, string(b))
+			cur = string(b)
+		}
+		if u, err := url.QueryUnescape(cur); err == nil && u != cur {
+			cands = append(cands, u)
+			cur = u
+		}
+	}
+	for _, c := range cands {
+		if isStream(c) {
+			return c
+		}
+	}
+	return s
+}
+
+func isStream(s string) bool {
+	l := strings.ToLower(s)
+	return strings.Contains(l, ".m3u8") || strings.Contains(l, ".mp4") || strings.Contains(l, ".flv")
+}
+
+func guessMime(s string) string {
+	l := strings.ToLower(s)
+	if strings.Contains(l, ".m3u8") {
+		return "application/vnd.apple.mpegurl"
+	}
+	return "video/mp4"
+}
 
 // Extract 从详情页 HTML 提取集数列表（通用规则 v2）。
 // 判定组合（满足任一即收）：

@@ -89,7 +89,9 @@ func (a *Aggregator) Search(ctx context.Context, query string) ([]Result, error)
 			errs = append(errs, err.Error())
 		}
 		for _, r := range rs {
-			if r.URL == "" || seen[r.URL] {
+			// 搜"盗版站"只要盗版站结果：过滤掉正版平台（B站/优酷/爱奇艺等）。
+			// B站 是独立链路（bili 包），不跟盗版站混。
+			if r.URL == "" || seen[r.URL] || isLegitSite(r.URL) {
 				continue
 			}
 			seen[r.URL] = true
@@ -130,6 +132,26 @@ func (a *Aggregator) get(ctx context.Context, rawURL, referer string) (*http.Res
 		req.Header.Set("Referer", referer)
 	}
 	return a.hc.Do(req)
+}
+
+// isLegitSite 已知正版平台域名：搜盗版站时过滤掉（B站/优酷/爱奇艺/腾讯等走各自链路，不与盗版站混）。
+func isLegitSite(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, d := range []string{
+		"bilibili.com", "b23.tv", "youku.com", "iqiyi.com", "qiyi.com",
+		"qq.com", "v.qq.com", "mgtv.com", "sohu.com", "douyin.com",
+		"miguvideo.com", "1905.com", "cctv.com", "xigua.com", "baidu.com",
+		"zhihu.com", "weibo.com", "douban.com", "sogou.com", "so.com",
+	} {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	return false
 }
 
 // isCaptcha 验证码/安全验证检测：命中返回 true（应换引擎）。
